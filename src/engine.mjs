@@ -56,6 +56,9 @@ async function fetchPolicyText(env, url) {
   } catch (_) { /* seguimos al navegador */ }
 
   // 2) Fallback: navegador headless para páginas con mucho JavaScript.
+  //    Apagado por defecto (evita cuelgues/latencia). Se activa con USE_BROWSER="true".
+  if (String(env.USE_BROWSER || "false") !== "true")
+    throw new EngineError("MERCHANT_UNRESOLVED", 422, "Page needs a browser to render (browser fallback disabled).");
   //    Todo el bloque va con timeout: si el navegador tarda, degradamos, no colgamos.
   let browser;
   try {
@@ -97,11 +100,12 @@ async function extract(env, policyText, req) {
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: userMsg },
   ];
+  const model = env.AI_MODEL || AI_MODEL; // se puede tunear desde el panel sin desplegar
   for (let attempt = 0; attempt < 2; attempt++) {
     let out;
     try {
       out = await withTimeout(
-        env.AI.run(AI_MODEL, {
+        env.AI.run(model, {
           messages,
           response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },
           max_tokens: 2048,

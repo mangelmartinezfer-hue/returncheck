@@ -156,6 +156,9 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
+        build: "2026-08-22-fast",           // marcador de versión para verificar el deploy
+        model: env.AI_MODEL || "default-8b",
+        browser_fallback: String(env.USE_BROWSER || "false") === "true",
         question: "Can this specific product actually be returned?",
         endpoints: { check: "POST /v1/check", signup: "POST /v1/signup", balance: "GET /v1/balance" },
         price_usd_per_call: Number(env.PRICE_USD || "0.02"),
