@@ -4,7 +4,7 @@ import { validateRequest, checkInvariants } from "../src/contract.mjs";
 import { applyDeadline } from "../src/decision.mjs";
 import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
-import { cacheKey, clauseInText, focusPolicyText, MAX_POLICY_CHARS } from "../src/text.mjs";
+import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS } from "../src/text.mjs";
 
 // ---------- Validación de entrada ----------
 test("request válida pasa", () => {
@@ -67,6 +67,25 @@ test("clauseInText rechaza citas demasiado cortas o vacías", () => {
   assert.equal(clauseInText("30 days", "returned within 30 days"), false); // < 12 chars
   assert.equal(clauseInText("", "algo"), false);
   assert.equal(clauseInText("returned within 30 days", ""), false);
+});
+
+// ---------- La cita debe SOSTENER el veredicto (fallos reales Allbirds/Olipop) ----------
+test("clauseSupportsVerdict rechaza citas de ENVÍOS (caso Allbirds/Olipop)", () => {
+  // Estos son los fallos que vimos en producción: citaba una frase de envíos.
+  assert.equal(clauseSupportsVerdict("Free ground shipping on orders over $100", { verdict: "YES" }), false);
+  assert.equal(clauseSupportsVerdict("Orders $50+ ship FREE", { verdict: "YES_WITH_CONDITIONS", days: 30 }), false);
+});
+test("clauseSupportsVerdict exige que el nº de días esté en la cita", () => {
+  assert.equal(clauseSupportsVerdict("Items may be returned within 30 days.", { verdict: "YES_WITH_CONDITIONS", days: 30 }), true);
+  assert.equal(clauseSupportsVerdict("Items may be returned within 30 days.", { verdict: "YES_WITH_CONDITIONS", days: 14 }), false);
+});
+test("clauseSupportsVerdict exige frase negativa para NO / NotPermitted", () => {
+  assert.equal(clauseSupportsVerdict("All sales are final for this item.", { verdict: "NO", category: "NotPermitted" }), true);
+  // Un 'NO' citando una cláusula que NO es negativa -> no vale.
+  assert.equal(clauseSupportsVerdict("Items may be returned within 30 days.", { verdict: "NO" }), false);
+});
+test("clauseSupportsVerdict acepta ventana ilimitada si habla de devoluciones", () => {
+  assert.equal(clauseSupportsVerdict("You may return items at any time for a refund.", { verdict: "YES", days: null }), true);
 });
 
 // ---------- Enfoque del texto de política (arregla el corte a 8000) ----------

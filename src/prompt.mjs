@@ -1,10 +1,10 @@
 // El "cerebro" del camino page_parse. Prompt v0.3 (doc 08) + esquema de salida
 // para DECODIFICACIÓN RESTRINGIDA: el modelo no puede emitir un enum inventado.
 
-// Modelo por defecto: RÁPIDO (8B). La corrección la garantiza la verificación
-// LITERAL de la cita (clauseInText), no el tamaño del modelo. Se puede sobrescribir
-// desde Cloudflare con la variable AI_MODEL sin tocar código.
-export const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
+// Modelo por defecto: 70B (elige mejor la cláusula correcta). La corrección la
+// blindan además clauseInText (la cita existe) + clauseSupportsVerdict (la cita
+// respalda el veredicto). Se puede sobrescribir desde Cloudflare con AI_MODEL.
+export const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 export const SYSTEM_PROMPT = `You are ReturnCheck's extraction engine. You receive the TEXT of a merchant's published return policy plus a REQUEST about one specific product. Decide whether THIS product can be returned under THESE conditions, and output ONE JSON object matching the given schema. No prose.
 

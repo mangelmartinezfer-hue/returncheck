@@ -6,7 +6,7 @@ import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL } from "./prompt.mjs";
 import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
-import { cacheKey, htmlToText, focusPolicyText, clauseInText } from "./text.mjs";
+import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict } from "./text.mjs";
 
 class EngineError extends Error {
   constructor(code, http, message) { super(message); this.code = code; this.http = http; }
@@ -17,7 +17,7 @@ const MAX_HTML_BYTES = 240000;   // techo de HTML crudo a procesar (evita matar 
 // Presupuestos de tiempo (ms): el motor NUNCA debe colgarse hasta el timeout de red.
 const T_PLAIN_FETCH = 6000;   // fetch HTTP plano
 const T_BROWSER     = 15000;  // navegador headless (abrir + cargar + leer)
-const T_AI          = 14000;  // llamada al modelo (por intento)
+const T_AI          = 18000;  // llamada al modelo (70B es más lento; navegador off deja margen)
 
 // Corre `promise` con un límite de tiempo; si se pasa, rechaza con EngineError.
 function withTimeout(promise, ms, code, message) {
@@ -149,7 +149,12 @@ async function assemble(ai, req, policyText, meta) {
   };
 
   const clauseOk = determinate && ai.policy && ai.evidence && ai.evidence.source_url &&
-                   clauseInText(ai.evidence.exact_clause, policyText);
+                   clauseInText(ai.evidence.exact_clause, policyText) &&
+                   clauseSupportsVerdict(ai.evidence.exact_clause, {
+                     verdict: ai.verdict,
+                     days: ai.policy.merchant_return_days,
+                     category: ai.policy.return_category,
+                   });
   if (clauseOk) {
     resp.policy = {
       return_category: ai.policy.return_category,
@@ -178,7 +183,7 @@ async function assemble(ai, req, policyText, meta) {
     // Veredicto sin cita VERIFICABLE en la página -> degradar a UNKNOWN (nunca inventar).
     resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
     resp.confidence = 0; resp.policy = null; resp.evidence = null;
-    resp.reason = "The cited clause could not be verified verbatim on the page; not asserting a verdict.";
+    resp.reason = "The cited clause could not be verified as supporting the verdict on the page; not asserting a verdict.";
   }
 
   // Reconciliar categoría con veredicto: si es devolvible no puede ser NotPermitted.

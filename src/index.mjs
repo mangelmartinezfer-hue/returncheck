@@ -156,7 +156,7 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-22-fast2",          // marcador de versión para verificar el deploy
+        build: "2026-08-22-quality",        // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b",
         browser_fallback: String(env.USE_BROWSER || "false") === "true",
         question: "Can this specific product actually be returned?",

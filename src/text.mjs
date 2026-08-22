@@ -61,3 +61,26 @@ export function clauseInText(clause, text) {
   if (c.length < 12) return false; // demasiado corta para verificar
   return norm(text).includes(c);
 }
+
+// ¿La cita SOSTIENE de verdad el veredicto? (no basta con que exista en la página)
+// Arregla el fallo de citar frases de ENVÍOS ("Free shipping...") o afirmar días
+// que la cita no respalda. Reglas:
+//  - La cita debe hablar de DEVOLUCIONES (no solo de envíos).
+//  - Si hay días, el número debe aparecer en la cita.
+//  - Si el veredicto es NO / NotPermitted, la cita debe contener una frase negativa.
+export function clauseSupportsVerdict(clause, { verdict, days, category } = {}) {
+  if (!clause) return false;
+  const c = clause.toLowerCase();
+  const neg = /(final sale|sales? (are )?final|all sales final|non-?returnable|not returnable|cannot be returned|can'?t be returned|no returns?|not eligible|no refund|ineligible|venta final|no se admite|no reembolsable|no se puede devolver)/.test(c);
+  const notPermitted = verdict === "NO" || category === "NotPermitted";
+  // Para un veredicto NO, basta (y hace falta) una frase negativa clara.
+  if (notPermitted) return neg;
+  // Para un veredicto positivo, la cita debe hablar de DEVOLUCIONES (no de envíos)...
+  const mentionsReturns =
+    /\b(return|returns|returned|returnable|refund|refunds|refunded|exchange|exchanges|exchanged)\b/.test(c) ||
+    /devoluc|reembols|cambio|garant/.test(c);
+  if (!mentionsReturns) return false; // p.ej. "Free ground shipping..." -> no vale
+  // ...y si hay un nº de días, ese número debe aparecer en la cita.
+  if (days != null && !new RegExp("\\b" + days + "\\b").test(c)) return false;
+  return true;
+}
