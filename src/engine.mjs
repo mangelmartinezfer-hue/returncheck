@@ -38,8 +38,9 @@ async function fetchPolicyText(env, url) {
     const res = await withTimeout(
       fetch(url, {
         headers: {
-          "user-agent": "Mozilla/5.0 (compatible; ReturnCheckBot/1.0; +https://returncheck.dev)",
-          "accept": "text/html,application/xhtml+xml",
+          // UA de navegador real: muchas webs bloquean bots identificados.
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+          "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
           "accept-language": "en-US,en;q=0.9",
         },
         redirect: "follow",
