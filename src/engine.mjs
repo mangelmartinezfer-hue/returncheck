@@ -68,31 +68,47 @@ async function fetchPolicyText(env, url) {
   }
 }
 
-// Llama al modelo con decodificación restringida a esquema (no puede inventar enums).
+// Extrae un objeto JSON de la salida del modelo, tolerante a fences y prosa.
+function coerceJson(out) {
+  let obj = out && (out.response ?? out);
+  if (obj && typeof obj === "object") return obj;
+  if (typeof obj !== "string") return null;
+  let s = obj.trim().replace(/^```(?:json)?/i, "").replace(/```$/,"").trim();
+  const first = s.indexOf("{"), last = s.lastIndexOf("}");
+  if (first >= 0 && last > first) s = s.slice(first, last + 1);
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+// Llama al modelo con decodificación restringida a esquema. Reintenta una vez si
+// el modelo no devuelve JSON limpio (endurecido tras ver 500 en producción).
 async function extract(env, policyText, req) {
   const userMsg =
     `PRODUCT_URL: ${req.product_url}\n` +
     `REQUEST: ${JSON.stringify({ buyer_country: req.buyer_country, item_condition: req.item_condition || null, reason: req.reason || null })}\n` +
     `TODAY: ${todayDate()}\n` +
     `POLICY TEXT:\n${policyText}`;
-  let out;
-  try {
-    out = await env.AI.run(AI_MODEL, {
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMsg },
-      ],
-      response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },
-    });
-  } catch (e) {
-    throw new EngineError("UPSTREAM_TIMEOUT", 504, "The extraction model did not respond in time.");
+  const messages = [
+    { role: "system", content: SYSTEM_PROMPT },
+    { role: "user", content: userMsg },
+  ];
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let out;
+    try {
+      out = await env.AI.run(AI_MODEL, {
+        messages,
+        response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },
+        max_tokens: 1024,
+      });
+    } catch (e) {
+      if (attempt === 1) throw new EngineError("UPSTREAM_TIMEOUT", 504, "The extraction model did not respond in time.");
+      continue;
+    }
+    const parsed = coerceJson(out);
+    if (parsed && typeof parsed === "object") return parsed;
+    messages.push({ role: "user", content: "Your previous output was not valid JSON. Output ONLY the JSON object — no prose, no markdown, no code fences." });
   }
-  const obj = out && (out.response ?? out);
-  const parsed = typeof obj === "string" ? safeParse(obj) : obj;
-  if (!parsed || typeof parsed !== "object") throw new EngineError("INTERNAL", 500, "Model returned no valid object.");
-  return parsed;
+  throw new EngineError("INTERNAL", 500, "Model did not return valid JSON after retry.");
 }
-function safeParse(s) { try { return JSON.parse(s); } catch { return null; } }
 
 // Ensambla la respuesta completa del contrato a partir de lo que devolvió la IA.
 async function assemble(ai, req, policyText, meta) {
@@ -146,6 +162,20 @@ async function assemble(ai, req, policyText, meta) {
     resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
     resp.confidence = 0; resp.policy = null; resp.evidence = null;
     resp.reason = resp.reason || "The policy text did not provide a verifiable clause for this case.";
+  }
+
+  // Reconciliar categoría con veredicto: si es devolvible no puede ser NotPermitted.
+  if (resp.policy && resp.verdict !== "NO" && resp.policy.return_category === "NotPermitted") {
+    resp.policy.return_category = resp.policy.merchant_return_days != null ? "FiniteReturnWindow" : "UnlimitedWindow";
+  }
+  // Texto humano de respaldo si el modelo se queda demasiado corto.
+  if (!resp.answer_human || resp.answer_human.trim().length < 12) {
+    if (resp.verdict === "NO") resp.answer_human = "No. This item is not returnable under the merchant's published policy for this case.";
+    else if (resp.verdict === "UNKNOWN") resp.answer_human = "Unknown. The published policy does not resolve this specific case.";
+    else {
+      const d = resp.policy && resp.policy.merchant_return_days;
+      resp.answer_human = "Yes, with conditions" + (d ? ` — returnable within ${d} days under the merchant's policy.` : " under the merchant's published policy.");
+    }
   }
   return resp;
 }

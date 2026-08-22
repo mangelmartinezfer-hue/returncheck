@@ -1,7 +1,7 @@
 // El "cerebro" del camino page_parse. Prompt v0.3 (doc 08) + esquema de salida
 // para DECODIFICACIÓN RESTRINGIDA: el modelo no puede emitir un enum inventado.
 
-export const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
+export const AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 
 export const SYSTEM_PROMPT = `You are ReturnCheck's extraction engine. You receive the TEXT of a merchant's published return policy plus a REQUEST about one specific product. Decide whether THIS product can be returned under THESE conditions, and output ONE JSON object matching the given schema. No prose.
 
