@@ -1,0 +1,18 @@
+{
+  "name": "returncheck",
+  "version": "1.0.0",
+  "description": "ReturnCheck — can this specific product actually be returned? Paid check_return API for shopping agents. US first, global-ready.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "^0.0.14"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

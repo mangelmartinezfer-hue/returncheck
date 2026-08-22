@@ -1,0 +1,31 @@
+name = "returncheck"
+main = "src/index.mjs"
+compatibility_date = "2026-08-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- Variables públicas (NO secretos). Se pueden editar aquí o en el panel. ---
+[vars]
+PRICE_USD = "0.02"          # precio por consulta con veredicto útil
+CHARGE_ON_UNKNOWN = "false" # decisión 22 ago: NO se cobra en UNKNOWN
+SIGNUP_FREE_CREDIT_USD = "2.00"  # crédito de prueba al registrarse (~100 consultas)
+CACHE_TTL_DAYS = "7"        # frescura del extracto de política cacheado
+PUBLIC_BASE_URL = "https://returncheck.example.workers.dev"  # se ajusta tras el 1er deploy
+
+# --- Base de datos D1 (se crea en el panel; pega aquí el database_id que te dé) ---
+[[d1_databases]]
+binding = "DB"
+database_name = "returncheck"
+database_id = "PEGA_AQUI_EL_DATABASE_ID"
+
+# --- Modelo de IA (Workers AI) ---
+[ai]
+binding = "AI"
+
+# --- Navegador headless para leer las páginas de política ---
+[browser]
+binding = "BROWSER"
+
+# SECRETOS (NUNCA aquí): se ponen en el panel de Cloudflare o con
+#   wrangler secret put STRIPE_SECRET_KEY
+#   wrangler secret put STRIPE_WEBHOOK_SECRET
+# Los lee el código como env.STRIPE_SECRET_KEY / env.STRIPE_WEBHOOK_SECRET
