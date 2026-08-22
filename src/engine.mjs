@@ -14,36 +14,60 @@ class EngineError extends Error {
 
 const MAX_HTML_BYTES = 240000;   // techo de HTML crudo a procesar (evita matar el proceso)
 
+// Presupuestos de tiempo (ms): el motor NUNCA debe colgarse hasta el timeout de red.
+const T_PLAIN_FETCH = 6000;   // fetch HTTP plano
+const T_BROWSER     = 15000;  // navegador headless (abrir + cargar + leer)
+const T_AI          = 14000;  // llamada al modelo (por intento)
+
+// Corre `promise` con un límite de tiempo; si se pasa, rechaza con EngineError.
+function withTimeout(promise, ms, code, message) {
+  let timer;
+  const limit = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new EngineError(code, 504, message)), ms);
+  });
+  return Promise.race([promise, limit]).finally(() => clearTimeout(timer));
+}
+
 // Lee el texto de la política. HÍBRIDO: 1) fetch plano rápido; 2) si falla o
 // la página es una cáscara JS, usa el navegador headless (más lento).
+// Devuelve { text, via, fetch_ms } y NUNCA se cuelga: cada etapa lleva timeout.
 async function fetchPolicyText(env, url) {
-  // 1) Intento rápido: petición HTTP normal.
+  const t = Date.now();
+  // 1) Intento rápido: petición HTTP normal (con timeout).
   try {
-    const res = await fetch(url, {
-      headers: {
-        "user-agent": "Mozilla/5.0 (compatible; ReturnCheckBot/1.0; +https://returncheck.dev)",
-        "accept": "text/html,application/xhtml+xml",
-        "accept-language": "en-US,en;q=0.9",
-      },
-      redirect: "follow",
-      cf: { cacheTtl: 300, cacheEverything: true },
-    });
+    const res = await withTimeout(
+      fetch(url, {
+        headers: {
+          "user-agent": "Mozilla/5.0 (compatible; ReturnCheckBot/1.0; +https://returncheck.dev)",
+          "accept": "text/html,application/xhtml+xml",
+          "accept-language": "en-US,en;q=0.9",
+        },
+        redirect: "follow",
+        cf: { cacheTtl: 300, cacheEverything: true },
+      }),
+      T_PLAIN_FETCH, "UPSTREAM_TIMEOUT", "Plain fetch timed out."
+    );
     if (res.ok) {
       const html = (await res.text()).slice(0, MAX_HTML_BYTES); // cap antes de procesar
       const text = htmlToText(html);
-      if (text && text.length > 200) return { text: focusPolicyText(text), via: "structured_data" };
+      if (text && text.length > 200)
+        return { text: focusPolicyText(text), via: "structured_data", fetch_ms: Date.now() - t };
     }
   } catch (_) { /* seguimos al navegador */ }
 
   // 2) Fallback: navegador headless para páginas con mucho JavaScript.
+  //    Todo el bloque va con timeout: si el navegador tarda, degradamos, no colgamos.
   let browser;
   try {
-    browser = await puppeteer.launch(env.BROWSER);
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
-    const text = await page.evaluate(() => document.body.innerText || "");
-    return { text: focusPolicyText(text.replace(/\s+\n/g, "\n")), via: "page_parse" };
+    const text = await withTimeout((async () => {
+      browser = await puppeteer.launch(env.BROWSER);
+      const page = await browser.newPage();
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: T_BROWSER - 2000 });
+      return await page.evaluate(() => document.body.innerText || "");
+    })(), T_BROWSER, "UPSTREAM_TIMEOUT", "Headless browser timed out.");
+    return { text: focusPolicyText(text.replace(/\s+\n/g, "\n")), via: "page_parse", fetch_ms: Date.now() - t };
   } catch (e) {
+    if (e instanceof EngineError) throw e;
     throw new EngineError("UPSTREAM_TIMEOUT", 504, "Could not load the product/policy page in time.");
   } finally {
     if (browser) await browser.close().catch(() => {});
@@ -76,14 +100,18 @@ async function extract(env, policyText, req) {
   for (let attempt = 0; attempt < 2; attempt++) {
     let out;
     try {
-      out = await env.AI.run(AI_MODEL, {
-        messages,
-        response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },
-        max_tokens: 2048,
-      });
+      out = await withTimeout(
+        env.AI.run(AI_MODEL, {
+          messages,
+          response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },
+          max_tokens: 2048,
+        }),
+        T_AI, "UPSTREAM_TIMEOUT", "The extraction model did not respond in time."
+      );
     } catch (e) {
-      if (attempt === 1) throw new EngineError("UPSTREAM_TIMEOUT", 504, "The extraction model did not respond in time.");
-      continue;
+      // Si el modelo se pasa de tiempo o falla, NO reintentamos (nos mantenemos rápidos):
+      // devolvemos null y runCheck lo degrada a UNKNOWN honesto.
+      return null;
     }
     const parsed = coerceJson(out);
     if (parsed && typeof parsed === "object") return parsed;
@@ -181,16 +209,18 @@ export async function runCheck(env, req) {
   }
 
   // 2) Leer página + 3) IA restringida
-  const { text: policyText, via } = await fetchPolicyText(env, req.product_url);
+  const { text: policyText, via, fetch_ms } = await fetchPolicyText(env, req.product_url);
   if (!policyText || policyText.length < 40)
     throw new EngineError("MERCHANT_UNRESOLVED", 422, "Could not read a usable policy from the page.");
+  const tAi = Date.now();
   const ai = (await extract(env, policyText, req)) || {
     verdict: "UNKNOWN", confidence: 0, policy: null, evidence: null, answer_human: "",
     reason: "The engine could not extract a structured answer from this page.",
   };
+  const ai_ms = Date.now() - tAi;
 
   // 4) Ensamblar + invariantes
-  const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via: via };
+  const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via: via, fetch_ms, ai_ms, policy_chars: policyText.length };
   const resp = await assemble(ai, req, policyText, meta);
   const inv = checkInvariants(resp);
   if (!inv.ok) {
