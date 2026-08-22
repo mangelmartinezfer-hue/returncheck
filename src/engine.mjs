@@ -11,7 +11,8 @@ class EngineError extends Error {
   constructor(code, http, message) { super(message); this.code = code; this.http = http; }
 }
 
-const MAX_POLICY_CHARS = 12000; // techo de tokens de entrada (coste + límites del modelo)
+const MAX_POLICY_CHARS = 8000;   // techo de texto para el modelo (coste + límites)
+const MAX_HTML_BYTES = 180000;   // techo de HTML crudo a procesar (evita matar el proceso)
 
 function cacheKey(req) {
   return [normalizeUrl(req.product_url), req.item_condition || "", req.reason || ""].join("|");
@@ -47,7 +48,7 @@ async function fetchPolicyText(env, url) {
       cf: { cacheTtl: 300, cacheEverything: true },
     });
     if (res.ok) {
-      const html = await res.text();
+      const html = (await res.text()).slice(0, MAX_HTML_BYTES); // cap antes de procesar
       const text = htmlToText(html);
       if (text && text.length > 200) return { text: text.slice(0, MAX_POLICY_CHARS), via: "structured_data" };
     }
