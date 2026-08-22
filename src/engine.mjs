@@ -5,33 +5,14 @@ import puppeteer from "@cloudflare/puppeteer";
 import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL } from "./prompt.mjs";
 import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
-import { todayDate, addDays, sha256hex, normalizeUrl } from "./util.mjs";
+import { todayDate, addDays, sha256hex } from "./util.mjs";
+import { cacheKey, htmlToText, focusPolicyText, clauseInText } from "./text.mjs";
 
 class EngineError extends Error {
   constructor(code, http, message) { super(message); this.code = code; this.http = http; }
 }
 
-const MAX_POLICY_CHARS = 8000;   // techo de texto para el modelo (coste + límites)
-const MAX_HTML_BYTES = 180000;   // techo de HTML crudo a procesar (evita matar el proceso)
-
-function cacheKey(req) {
-  return [normalizeUrl(req.product_url), req.item_condition || "", req.reason || ""].join("|");
-}
-
-// Convierte HTML crudo en texto legible (rápido, sin navegador).
-export function htmlToText(html) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
-    .replace(/[ \t]+/g, " ")
-    .replace(/\n\s*\n\s*\n+/g, "\n\n")
-    .trim();
-}
+const MAX_HTML_BYTES = 240000;   // techo de HTML crudo a procesar (evita matar el proceso)
 
 // Lee el texto de la política. HÍBRIDO: 1) fetch plano rápido; 2) si falla o
 // la página es una cáscara JS, usa el navegador headless (más lento).
@@ -50,7 +31,7 @@ async function fetchPolicyText(env, url) {
     if (res.ok) {
       const html = (await res.text()).slice(0, MAX_HTML_BYTES); // cap antes de procesar
       const text = htmlToText(html);
-      if (text && text.length > 200) return { text: text.slice(0, MAX_POLICY_CHARS), via: "structured_data" };
+      if (text && text.length > 200) return { text: focusPolicyText(text), via: "structured_data" };
     }
   } catch (_) { /* seguimos al navegador */ }
 
@@ -61,7 +42,7 @@ async function fetchPolicyText(env, url) {
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
     const text = await page.evaluate(() => document.body.innerText || "");
-    return { text: text.replace(/\s+\n/g, "\n").slice(0, MAX_POLICY_CHARS), via: "page_parse" };
+    return { text: focusPolicyText(text.replace(/\s+\n/g, "\n")), via: "page_parse" };
   } catch (e) {
     throw new EngineError("UPSTREAM_TIMEOUT", 504, "Could not load the product/policy page in time.");
   } finally {
@@ -134,7 +115,9 @@ async function assemble(ai, req, policyText, meta) {
     meta,
   };
 
-  if (determinate && ai.policy && ai.evidence && ai.evidence.exact_clause && ai.evidence.source_url) {
+  const clauseOk = determinate && ai.policy && ai.evidence && ai.evidence.source_url &&
+                   clauseInText(ai.evidence.exact_clause, policyText);
+  if (clauseOk) {
     resp.policy = {
       return_category: ai.policy.return_category,
       merchant_return_days: ai.policy.merchant_return_days ?? null,
@@ -159,10 +142,10 @@ async function assemble(ai, req, policyText, meta) {
       policy_version: await sha256hex(policyText),
     };
   } else if (determinate) {
-    // El modelo dio un veredicto sin prueba -> por seguridad, degradar a UNKNOWN.
+    // Veredicto sin cita VERIFICABLE en la página -> degradar a UNKNOWN (nunca inventar).
     resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
     resp.confidence = 0; resp.policy = null; resp.evidence = null;
-    resp.reason = resp.reason || "The policy text did not provide a verifiable clause for this case.";
+    resp.reason = "The cited clause could not be verified verbatim on the page; not asserting a verdict.";
   }
 
   // Reconciliar categoría con veredicto: si es devolvible no puede ser NotPermitted.

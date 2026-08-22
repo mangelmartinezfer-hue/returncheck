@@ -10,7 +10,7 @@ export function validateRequest(body) {
   if (!body || typeof body !== "object")
     return { ok: false, code: "INVALID_INPUT", message: "Body must be a JSON object." };
 
-  const { product_url, buyer_country, merchant, item_condition, purchase_date, reason } = body;
+  const { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name } = body;
 
   if (typeof product_url !== "string" || !/^https?:\/\//i.test(product_url))
     return { ok: false, code: "INVALID_INPUT", message: "product_url is required and must be an http(s) URL." };
@@ -28,10 +28,16 @@ export function validateRequest(body) {
   if (purchase_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(purchase_date))
     return { ok: false, code: "INVALID_INPUT", message: "purchase_date must be YYYY-MM-DD." };
 
+  if (delivery_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(delivery_date))
+    return { ok: false, code: "INVALID_INPUT", message: "delivery_date must be YYYY-MM-DD." };
+
   if (merchant !== undefined && typeof merchant !== "string")
     return { ok: false, code: "INVALID_INPUT", message: "merchant must be a string." };
 
-  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, reason } };
+  if (seller_name !== undefined && typeof seller_name !== "string")
+    return { ok: false, code: "INVALID_INPUT", message: "seller_name must be a string." };
+
+  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name } };
 }
 
 // Invariantes del contrato (sección 7). Defensa antes de responder: si el motor

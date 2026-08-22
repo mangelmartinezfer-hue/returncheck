@@ -4,6 +4,7 @@ import { validateRequest, checkInvariants } from "../src/contract.mjs";
 import { applyDeadline } from "../src/decision.mjs";
 import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
+import { cacheKey, clauseInText, focusPolicyText, MAX_POLICY_CHARS } from "../src/text.mjs";
 
 // ---------- Validación de entrada ----------
 test("request válida pasa", () => {
@@ -44,6 +45,55 @@ test("ventana vencida flipea a NO", () => {
   const out = applyDeadline(structuredClone(resp), { purchase_date: "2026-06-01" }, "2026-08-10");
   assert.equal(out.verdict, "NO");
   assert.equal(out.returnable, false);
+});
+test("deadline cuenta desde delivery_date si existe (no desde purchase_date)", () => {
+  const resp = { verdict: "YES_WITH_CONDITIONS", returnable: true, policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, deadline_date: null } };
+  // Compra el 1-jul pero entrega el 1-ago -> deadline debe ser 31-ago, no 31-jul.
+  const out = applyDeadline(structuredClone(resp), { purchase_date: "2026-07-01", delivery_date: "2026-08-01" }, "2026-08-10");
+  assert.equal(out.policy.deadline_date, "2026-08-31");
+  assert.equal(out.verdict, "YES_WITH_CONDITIONS"); // sigue en ventana gracias a la entrega
+});
+
+// ---------- Verificación LITERAL de la cita (nunca inventar) ----------
+test("clauseInText acepta cita presente y rechaza cita ausente", () => {
+  const page = "Our Returns Policy: items may be returned within 30 days of delivery for a full refund.";
+  assert.equal(clauseInText("returned within 30 days of delivery", page), true);
+  // Distinta puntuación/comillas y mayúsculas: se normaliza igual.
+  assert.equal(clauseInText('“Returned within 30 DAYS of delivery”', page), true);
+  // Cita que el modelo se ha inventado (no está en la página): se rechaza.
+  assert.equal(clauseInText("returned within 90 days for store credit", page), false);
+});
+test("clauseInText rechaza citas demasiado cortas o vacías", () => {
+  assert.equal(clauseInText("30 days", "returned within 30 days"), false); // < 12 chars
+  assert.equal(clauseInText("", "algo"), false);
+  assert.equal(clauseInText("returned within 30 days", ""), false);
+});
+
+// ---------- Enfoque del texto de política (arregla el corte a 8000) ----------
+test("focusPolicyText devuelve el texto tal cual si cabe", () => {
+  const short = "return within 30 days";
+  assert.equal(focusPolicyText(short), short);
+});
+test("focusPolicyText captura la sección de política aunque esté muy al final", () => {
+  const filler = "lorem ipsum ".repeat(2000); // >> MAX_POLICY_CHARS, sin palabras clave
+  const clause = "Items may be returned within 30 days of delivery for a full refund.";
+  const text = filler + clause + filler;
+  const focused = focusPolicyText(text);
+  assert.ok(focused.length <= MAX_POLICY_CHARS);
+  assert.ok(focused.includes("returned within 30 days of delivery"),
+    "la ventana debe incluir la cláusula de devolución");
+});
+
+// ---------- Clave de caché: no mezclar contextos ----------
+test("cacheKey separa por país, comerciante y vendedor", () => {
+  const base = { product_url: "https://a.com/p?id=5", buyer_country: "US" };
+  const us = cacheKey(base);
+  const es = cacheKey({ ...base, buyer_country: "ES" });
+  assert.notEqual(us, es); // distinto país -> distinta clave
+  const seller = cacheKey({ ...base, seller_name: "ThirdPartyLLC" });
+  assert.notEqual(us, seller); // distinto vendedor (marketplace) -> distinta clave
+  // Misma petición (con basura de URL normalizada) -> misma clave.
+  assert.equal(cacheKey({ product_url: "https://a.com/p?utm_source=x&id=5#f", buyer_country: "US" }), us);
 });
 
 // ---------- Utilidades ----------

@@ -126,17 +126,21 @@ export default {
       if (request.method === "POST" && p === "/v1/agent/check")
         return educated402(env, "Agentic x402 endpoint is wired but not yet enabled (Phase 2). Use /v1/check with an API key.");
       if (request.method === "POST" && p === "/webhooks/stripe") return await handleStripeWebhook(request, env);
-      // Ruta de PRUEBA (sin auth, sin cobro). Para validar el motor desde el navegador.
-      // TODO: quitar o proteger antes del lanzamiento público.
+      // Ruta de PRUEBA (sin cobro), PROTEGIDA con clave. Para enseñar la demo sin abuso.
+      // TODO: quitar del todo antes del lanzamiento público.
       if (request.method === "GET" && p === "/demo") {
+        if (!env.DEMO_KEY || url.searchParams.get("k") !== env.DEMO_KEY)
+          return errorResponse("INVALID_INPUT", "Not found.", 404); // oculta la ruta si falta la clave
         const u = url.searchParams.get("url");
-        if (!u) return errorResponse("INVALID_INPUT", "Añade ?url=<url_del_producto> (y opcional &condition=unopened&country=US)", 400);
+        if (!u) return errorResponse("INVALID_INPUT", "Añade ?url=<url_del_producto> (y opcional &condition=unopened&country=US&delivery_date=YYYY-MM-DD)", 400);
         try {
           const r = await runCheck(env, {
             product_url: u,
             buyer_country: url.searchParams.get("country") || "US",
             item_condition: url.searchParams.get("condition") || undefined,
             purchase_date: url.searchParams.get("purchase_date") || undefined,
+            delivery_date: url.searchParams.get("delivery_date") || undefined,
+            seller_name: url.searchParams.get("seller") || undefined,
           });
           return json(r);
         } catch (e) {
