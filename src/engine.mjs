@@ -133,7 +133,7 @@ async function assemble(ai, req, policyText, meta) {
     meta,
   };
 
-  if (determinate && ai.policy && ai.evidence) {
+  if (determinate && ai.policy && ai.evidence && ai.evidence.exact_clause && ai.evidence.source_url) {
     resp.policy = {
       return_category: ai.policy.return_category,
       merchant_return_days: ai.policy.merchant_return_days ?? null,
@@ -209,7 +209,12 @@ export async function runCheck(env, req) {
   const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via: via };
   const resp = await assemble(ai, req, policyText, meta);
   const inv = checkInvariants(resp);
-  if (!inv.ok) throw new EngineError("INTERNAL", 500, "Engine produced an invalid response: " + inv.problems.join("; "));
+  if (!inv.ok) {
+    // Nunca reventamos: si el resultado no es válido, degradamos a UNKNOWN honesto.
+    resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
+    resp.confidence = 0; resp.policy = null; resp.evidence = null;
+    resp.reason = "Engine could not produce a valid grounded answer (" + inv.problems.join("; ") + ").";
+  }
 
   // 5) Cachear el extracto (sin deadline por fecha) y recomputar deadline por petición
   const toCache = JSON.parse(JSON.stringify(resp));
