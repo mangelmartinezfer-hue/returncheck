@@ -140,8 +140,14 @@ export default {
           });
           return json(r);
         } catch (e) {
-          if (e instanceof EngineError) return errorResponse(e.code, e.message, e.http);
-          return errorResponse("INTERNAL", "Unexpected error in demo.", 500);
+          // Debug de /demo: devolvemos el error real (status 200 para poder leerlo).
+          return json({
+            demo_error: true,
+            code: e && e.code,
+            name: e && e.name,
+            message: e && e.message,
+            stack: String((e && e.stack) || "").split("\n").slice(0, 6),
+          }, { status: 200 });
         }
       }
       if (p === "/") return json({
