@@ -126,6 +126,24 @@ export default {
       if (request.method === "POST" && p === "/v1/agent/check")
         return educated402(env, "Agentic x402 endpoint is wired but not yet enabled (Phase 2). Use /v1/check with an API key.");
       if (request.method === "POST" && p === "/webhooks/stripe") return await handleStripeWebhook(request, env);
+      // Ruta de PRUEBA (sin auth, sin cobro). Para validar el motor desde el navegador.
+      // TODO: quitar o proteger antes del lanzamiento público.
+      if (request.method === "GET" && p === "/demo") {
+        const u = url.searchParams.get("url");
+        if (!u) return errorResponse("INVALID_INPUT", "Añade ?url=<url_del_producto> (y opcional &condition=unopened&country=US)", 400);
+        try {
+          const r = await runCheck(env, {
+            product_url: u,
+            buyer_country: url.searchParams.get("country") || "US",
+            item_condition: url.searchParams.get("condition") || undefined,
+            purchase_date: url.searchParams.get("purchase_date") || undefined,
+          });
+          return json(r);
+        } catch (e) {
+          if (e instanceof EngineError) return errorResponse(e.code, e.message, e.http);
+          return errorResponse("INTERNAL", "Unexpected error in demo.", 500);
+        }
+      }
       if (p === "/") return json({
         name: "ReturnCheck",
         question: "Can this specific product actually be returned?",
