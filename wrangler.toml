@@ -15,7 +15,7 @@ PUBLIC_BASE_URL = "https://returncheck.example.workers.dev"  # se ajusta tras el
 [[d1_databases]]
 binding = "DB"
 database_name = "returncheck"
-database_id = "PEGA_AQUI_EL_DATABASE_ID"
+database_id = "0f67ff3e-850d-41d4-b2b0-88209fb4b651"
 
 # --- Modelo de IA (Workers AI) ---
 [ai]
