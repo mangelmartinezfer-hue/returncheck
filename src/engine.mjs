@@ -17,15 +17,50 @@ function cacheKey(req) {
   return [normalizeUrl(req.product_url), req.item_condition || "", req.reason || ""].join("|");
 }
 
-// Lee el texto visible de la página con el navegador headless de Cloudflare.
+// Convierte HTML crudo en texto legible (rápido, sin navegador).
+export function htmlToText(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n\s*\n\s*\n+/g, "\n\n")
+    .trim();
+}
+
+// Lee el texto de la política. HÍBRIDO: 1) fetch plano rápido; 2) si falla o
+// la página es una cáscara JS, usa el navegador headless (más lento).
 async function fetchPolicyText(env, url) {
+  // 1) Intento rápido: petición HTTP normal.
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "user-agent": "Mozilla/5.0 (compatible; ReturnCheckBot/1.0; +https://returncheck.dev)",
+        "accept": "text/html,application/xhtml+xml",
+        "accept-language": "en-US,en;q=0.9",
+      },
+      redirect: "follow",
+      cf: { cacheTtl: 300, cacheEverything: true },
+    });
+    if (res.ok) {
+      const html = await res.text();
+      const text = htmlToText(html);
+      if (text && text.length > 200) return { text: text.slice(0, MAX_POLICY_CHARS), via: "structured_data" };
+    }
+  } catch (_) { /* seguimos al navegador */ }
+
+  // 2) Fallback: navegador headless para páginas con mucho JavaScript.
   let browser;
   try {
     browser = await puppeteer.launch(env.BROWSER);
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
     const text = await page.evaluate(() => document.body.innerText || "");
-    return text.replace(/\s+\n/g, "\n").slice(0, MAX_POLICY_CHARS);
+    return { text: text.replace(/\s+\n/g, "\n").slice(0, MAX_POLICY_CHARS), via: "page_parse" };
   } catch (e) {
     throw new EngineError("UPSTREAM_TIMEOUT", 504, "Could not load the product/policy page in time.");
   } finally {
@@ -132,13 +167,13 @@ export async function runCheck(env, req) {
   }
 
   // 2) Leer página + 3) IA restringida
-  const policyText = await fetchPolicyText(env, req.product_url);
+  const { text: policyText, via } = await fetchPolicyText(env, req.product_url);
   if (!policyText || policyText.length < 40)
     throw new EngineError("MERCHANT_UNRESOLVED", 422, "Could not read a usable policy from the page.");
   const ai = await extract(env, policyText, req);
 
   // 4) Ensamblar + invariantes
-  const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via: "page_parse" };
+  const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via: via };
   const resp = await assemble(ai, req, policyText, meta);
   const inv = checkInvariants(resp);
   if (!inv.ok) throw new EngineError("INTERNAL", 500, "Engine produced an invalid response: " + inv.problems.join("; "));
