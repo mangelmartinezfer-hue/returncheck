@@ -97,7 +97,7 @@ async function extract(env, policyText, req) {
       out = await env.AI.run(AI_MODEL, {
         messages,
         response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },
-        max_tokens: 1024,
+        max_tokens: 2048,
       });
     } catch (e) {
       if (attempt === 1) throw new EngineError("UPSTREAM_TIMEOUT", 504, "The extraction model did not respond in time.");
@@ -105,9 +105,9 @@ async function extract(env, policyText, req) {
     }
     const parsed = coerceJson(out);
     if (parsed && typeof parsed === "object") return parsed;
-    messages.push({ role: "user", content: "Your previous output was not valid JSON. Output ONLY the JSON object — no prose, no markdown, no code fences." });
+    messages.push({ role: "user", content: "Your previous output was not valid JSON (it may have been cut off). Output ONLY the JSON object, keep exact_clause short, no prose, no markdown, no code fences." });
   }
-  throw new EngineError("INTERNAL", 500, "Model did not return valid JSON after retry.");
+  return null; // no reventamos: runCheck lo degrada a UNKNOWN
 }
 
 // Ensambla la respuesta completa del contrato a partir de lo que devolvió la IA.
@@ -200,7 +200,10 @@ export async function runCheck(env, req) {
   const { text: policyText, via } = await fetchPolicyText(env, req.product_url);
   if (!policyText || policyText.length < 40)
     throw new EngineError("MERCHANT_UNRESOLVED", 422, "Could not read a usable policy from the page.");
-  const ai = await extract(env, policyText, req);
+  const ai = (await extract(env, policyText, req)) || {
+    verdict: "UNKNOWN", confidence: 0, policy: null, evidence: null, answer_human: "",
+    reason: "The engine could not extract a structured answer from this page.",
+  };
 
   // 4) Ensamblar + invariantes
   const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via: via };
