@@ -181,6 +181,14 @@ async function assemble(ai, req, policyText, meta) {
     };
   } else if (determinate) {
     // Veredicto sin cita VERIFICABLE en la página -> degradar a UNKNOWN (nunca inventar).
+    // Guardamos por qué falló (diagnóstico): útil para calibrar sin ir a ciegas.
+    resp.meta = { ...meta, degrade: {
+      rejected_clause: (ai.evidence && ai.evidence.exact_clause) || null,
+      in_text: !!(ai.evidence && clauseInText(ai.evidence.exact_clause, policyText)),
+      supports: clauseSupportsVerdict((ai.evidence && ai.evidence.exact_clause) || "", {
+        verdict: ai.verdict, days: ai.policy && ai.policy.merchant_return_days, category: ai.policy && ai.policy.return_category,
+      }),
+    } };
     resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
     resp.confidence = 0; resp.policy = null; resp.evidence = null;
     resp.reason = "The cited clause could not be verified as supporting the verdict on the page; not asserting a verdict.";

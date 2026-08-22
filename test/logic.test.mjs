@@ -63,6 +63,14 @@ test("clauseInText acepta cita presente y rechaza cita ausente", () => {
   // Cita que el modelo se ha inventado (no está en la página): se rechaza.
   assert.equal(clauseInText("returned within 90 days for store credit", page), false);
 });
+test("clauseInText acepta paráfrasis de borde si hay un tramo largo literal (caso Apple)", () => {
+  const page = "You can return or exchange it with a receipt within 14 days of the date you receive the product from Apple.";
+  // El modelo cambia el borde pero conserva un tramo largo literal de la página.
+  const paraphrased = "Per policy, you can return or exchange it with a receipt within 14 days of receipt.";
+  assert.equal(clauseInText(paraphrased, page), true);
+  // Una cita totalmente distinta (sin tramo literal largo) -> rechazada.
+  assert.equal(clauseInText("Returns accepted within ninety days for any reason whatsoever", page), false);
+});
 test("clauseInText rechaza citas demasiado cortas o vacías", () => {
   assert.equal(clauseInText("30 days", "returned within 30 days"), false); // < 12 chars
   assert.equal(clauseInText("", "algo"), false);

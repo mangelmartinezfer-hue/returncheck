@@ -53,13 +53,21 @@ export function focusPolicyText(text) {
   return text.slice(start, start + MAX_POLICY_CHARS);
 }
 
-// ¿La cita aparece LITERALMENTE en el texto capturado? (normaliza espacios y comillas)
-export function clauseInText(clause, text) {
+// ¿La cita está anclada LITERALMENTE en la página? Ideal: la frase entera aparece.
+// Si el modelo la parafrasea en los bordes, aceptamos si al menos un TRAMO seguido
+// de `minRun` caracteres es literal en la página (sigue probando cita real, sin inventar).
+export function clauseInText(clause, text, minRun = 40) {
   if (!clause || !text) return false;
   const norm = (s) => s.toLowerCase().replace(/["“”'’]/g, "").replace(/\s+/g, " ").trim();
   const c = norm(clause);
-  if (c.length < 12) return false; // demasiado corta para verificar
-  return norm(text).includes(c);
+  const t = norm(text);
+  if (c.length < 12) return false;          // demasiado corta para verificar
+  if (t.includes(c)) return true;            // caso ideal: frase entera literal
+  if (c.length <= minRun) return false;      // corta y no está entera -> no vale
+  for (let i = 0; i + minRun <= c.length; i += 10) {
+    if (t.includes(c.slice(i, i + minRun))) return true; // hay una tirada literal larga
+  }
+  return false;
 }
 
 // ¿La cita SOSTIENE de verdad el veredicto? (no basta con que exista en la página)
