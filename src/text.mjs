@@ -80,9 +80,9 @@ export function clauseSupportsVerdict(clause, { verdict, days, category } = {}) 
   if (!clause) return false;
   const c = clause.toLowerCase();
   const neg = /(final sale|sales? (are )?final|all sales final|non-?returnable|not returnable|cannot be returned|can'?t be returned|no returns?|not eligible|no refund|ineligible|venta final|no se admite|no reembolsable|no se puede devolver)/.test(c);
-  const notPermitted = verdict === "NO" || category === "NotPermitted";
+  // La decisión la manda el VEREDICTO, no la categoría (que el modelo rellena mal a veces).
   // Para un veredicto NO, basta (y hace falta) una frase negativa clara.
-  if (notPermitted) return neg;
+  if (verdict === "NO") return neg;
   // Para un veredicto positivo, la cita debe hablar de DEVOLUCIONES (no de envíos)...
   const mentionsReturns =
     /\b(return|returns|returned|returnable|refund|refunds|refunded|exchange|exchanges|exchanged)\b/.test(c) ||
