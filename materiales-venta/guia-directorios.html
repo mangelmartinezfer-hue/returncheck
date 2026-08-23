@@ -1,0 +1,149 @@
+<title>Alta en directorios MCP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#F6F7F9;--surface:#FFFFFF;--surface-2:#EEF1F5;--line:#DDE2E9;
+  --ink:#0C1116;--ink-2:#41505F;--ink-3:#71818F;
+  --accent:#2a78d6;--accent-ink:#1c5cab;--good:#1baf7a;
+  --shadow:0 1px 2px rgba(12,17,22,.06),0 8px 24px -12px rgba(12,17,22,.14);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:#0B0E13;--surface:#12161D;--surface-2:#1A2029;--line:#262E39;
+  --ink:#F2F5F8;--ink-2:#AAB7C4;--ink-3:#71818F;
+  --accent:#3987e5;--accent-ink:#7FB0F2;--good:#25b483;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -16px rgba(0,0,0,.6);
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0B0E13;--surface:#12161D;--surface-2:#1A2029;--line:#262E39;
+  --ink:#F2F5F8;--ink-2:#AAB7C4;--ink-3:#71818F;
+  --accent:#3987e5;--accent-ink:#7FB0F2;--good:#25b483;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 12px 32px -16px rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;line-height:1.6}
+.wrap{max-width:760px;margin:0 auto;padding:0 20px}
+h1,h2,h3{font-family:"Archivo",sans-serif;line-height:1.15;text-wrap:balance;margin:0}
+.mono{font-family:"IBM Plex Mono",monospace}
+header{padding:48px 0 26px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+h1{font-size:clamp(26px,5vw,38px);font-weight:800;letter-spacing:-.02em;margin-top:12px}
+header p{color:var(--ink-2);max-width:60ch;margin-top:12px}
+.note{background:var(--surface-2);border:1px solid var(--line);border-left:3px solid var(--good);border-radius:12px;padding:16px 18px;margin:20px 0}
+.note p{margin:0;color:var(--ink-2);font-size:14.5px}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px;margin:16px 0;box-shadow:var(--shadow)}
+.step-h{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.num{flex:none;width:30px;height:30px;border-radius:8px;background:var(--accent);color:#fff;font-family:"Archivo";font-weight:700;display:grid;place-items:center;font-size:14px}
+.step h3{font-size:17px;font-weight:700}
+.step .what{color:var(--ink-2);font-size:14px;margin:2px 0 12px}
+.step a.link{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--accent-ink);word-break:break-all}
+.field{margin-top:12px}
+.field .lbl{font-size:12px;color:var(--ink-3);font-family:"IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.copy{position:relative;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px 44px 12px 14px;font-family:"IBM Plex Mono",monospace;font-size:13px;color:var(--ink);white-space:pre-wrap;word-break:break-word}
+.copy button{position:absolute;top:8px;right:8px;background:var(--surface);border:1px solid var(--line);border-radius:7px;color:var(--ink-2);font-family:"IBM Plex Mono",monospace;font-size:11px;padding:4px 8px;cursor:pointer}
+.copy button:hover{color:var(--ink)}
+.copy button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.done{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:14px;color:var(--ink-2);cursor:pointer;user-select:none}
+.done input{width:18px;height:18px;accent-color:var(--good)}
+.toggle{float:right;font-family:"IBM Plex Mono",monospace;font-size:12px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);border-radius:8px;padding:6px 10px;cursor:pointer;margin-top:44px}
+footer{padding:30px 0 60px;color:var(--ink-3);font-size:13px}
+</style>
+
+<div class="wrap">
+  <button class="toggle" id="tgl">◐ tema</button>
+  <header>
+    <div class="eyebrow">ReturnCheck · difusión ante robots</div>
+    <h1>Alta en directorios MCP</h1>
+    <p>Estos son los sitios donde los agentes y desarrolladores descubren herramientas MCP. Copia y pega el texto de cada bloque. El texto va en inglés porque son directorios internacionales — es lo correcto aquí.</p>
+  </header>
+
+  <div class="note"><p><strong>Antes de empezar — dato clave:</strong> ya estamos en el MCP Registry oficial, y varios directorios (Glama, PulseMCP) lo rastrean solos, así que puede que aparezcamos ahí en unos días sin hacer nada. Concentra el esfuerzo en <strong>mcp.so</strong>, <strong>Smithery</strong> y el <strong>PR a awesome-mcp-servers</strong>. Si en Glama/PulseMCP ya te sale ReturnCheck al buscarlo, ¡mejor, tachas y a otra cosa!</p></div>
+
+  <h2 style="font-size:15px;font-family:'IBM Plex Mono',monospace;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em;margin:26px 0 4px">Datos para copiar (valen para todos)</h2>
+  <div class="step">
+    <div class="field"><div class="lbl">Nombre</div><div class="copy">ReturnCheck<button data-c>copiar</button></div></div>
+    <div class="field"><div class="lbl">Una línea (tagline)</div><div class="copy">Verified return-policy answers for AI shopping agents — never guesses.<button data-c>copiar</button></div></div>
+    <div class="field"><div class="lbl">Descripción</div><div class="copy">Ask "can this specific product actually be returned?" and get a verified verdict (YES / YES_WITH_CONDITIONS / NO / UNKNOWN) with the exact policy clause, source URL, return window and confidence. It never invents: returns UNKNOWN if it can't verify a clause. MCP tool check_return. $0.02 per verified answer, UNKNOWN is free, keyless free trial available.<button data-c>copiar</button></div></div>
+    <div class="field"><div class="lbl">MCP endpoint (Streamable HTTP)</div><div class="copy">https://returncheck.m-angelmartinez-fer.workers.dev/mcp<button data-c>copiar</button></div></div>
+    <div class="field"><div class="lbl">Web</div><div class="copy">https://returncheck.m-angelmartinez-fer.workers.dev<button data-c>copiar</button></div></div>
+    <div class="field"><div class="lbl">Nombre de la herramienta</div><div class="copy">check_return<button data-c>copiar</button></div></div>
+    <div class="field"><div class="lbl">Categorías / tags</div><div class="copy">e-commerce, shopping, returns, commerce, payments, x402, verification<button data-c>copiar</button></div></div>
+  </div>
+
+  <h2 style="font-size:15px;font-family:'IBM Plex Mono',monospace;color:var(--ink-3);text-transform:uppercase;letter-spacing:.08em;margin:30px 0 4px">Los directorios, uno a uno</h2>
+
+  <div class="step">
+    <div class="step-h"><span class="num">1</span><h3>mcp.so</h3></div>
+    <div class="what">El directorio más grande de servidores MCP. Busca el botón <strong>“Submit”</strong> (arriba a la derecha) y rellena con los datos de arriba. Pega el MCP endpoint donde pida la URL del servidor.</div>
+    <a class="link" href="https://mcp.so/submit" target="_blank" rel="noopener">https://mcp.so/submit</a>
+    <label class="done"><input type="checkbox" data-k="mcpso"> Hecho</label>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="num">2</span><h3>Glama</h3></div>
+    <div class="what">Primero <strong>busca “ReturnCheck”</strong> en su buscador: si ya aparece (lo cogió del registry), listo. Si no, busca la opción <strong>“Add server”</strong>.</div>
+    <a class="link" href="https://glama.ai/mcp/servers" target="_blank" rel="noopener">https://glama.ai/mcp/servers</a>
+    <label class="done"><input type="checkbox" data-k="glama"> Hecho</label>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="num">3</span><h3>PulseMCP</h3></div>
+    <div class="what">Igual que Glama: busca “ReturnCheck” primero. Si no está, busca <strong>“Submit”</strong> en el pie o el menú.</div>
+    <a class="link" href="https://www.pulsemcp.com/" target="_blank" rel="noopener">https://www.pulsemcp.com</a>
+    <label class="done"><input type="checkbox" data-k="pulse"> Hecho</label>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="num">4</span><h3>Smithery</h3></div>
+    <div class="what">Normalmente conecta tu <strong>repo de GitHub</strong>. Requiere que el repo sea público (ver paso 6). Inicia sesión con GitHub y usa <strong>“Add server”</strong> apuntando al repo returncheck.</div>
+    <a class="link" href="https://smithery.ai/" target="_blank" rel="noopener">https://smithery.ai</a>
+    <label class="done"><input type="checkbox" data-k="smithery"> Hecho</label>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="num">5</span><h3>awesome-mcp-servers (GitHub)</h3></div>
+    <div class="what">Es una lista muy visitada. Se añade con un <strong>Pull Request</strong>: pulsa el lápiz para editar el README, añade una línea con el nombre y enlace, y crea el PR. Si te lía, dímelo y te escribo yo la línea exacta y el paso a paso.</div>
+    <a class="link" href="https://github.com/punkpeye/awesome-mcp-servers" target="_blank" rel="noopener">https://github.com/punkpeye/awesome-mcp-servers</a>
+    <div class="field"><div class="lbl">Línea para el PR (ejemplo)</div><div class="copy">- [ReturnCheck](https://returncheck.m-angelmartinez-fer.workers.dev) - Verified return-policy answers for AI shopping agents; MCP tool check_return, never guesses.<button data-c>copiar</button></div></div>
+    <label class="done"><input type="checkbox" data-k="awesome"> Hecho</label>
+  </div>
+
+  <div class="step">
+    <div class="step-h"><span class="num">6</span><h3>Hacer público el repo de GitHub</h3></div>
+    <div class="what">Para que buscadores y agentes lo indexen (y para Smithery). En tu repo: <strong>Settings → General → Danger Zone → Change visibility → Make public</strong>. El README ya está optimizado.</div>
+    <label class="done"><input type="checkbox" data-k="public"> Hecho</label>
+  </div>
+
+  <footer>Consejo: si un directorio te pide algo raro o no encuentras el botón, hazme una captura y te guío. Cuando termines una tanda, avísame y comprobamos que la API responde bien a quien la descubra.</footer>
+</div>
+
+<script>
+(function(){
+  var root=document.documentElement,tgl=document.getElementById('tgl');
+  try{var s=localStorage.getItem('rc-theme');if(s)root.setAttribute('data-theme',s);}catch(e){}
+  tgl.addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    var dark=cur?cur==='dark':matchMedia('(prefers-color-scheme: dark)').matches;
+    var n=dark?'light':'dark';root.setAttribute('data-theme',n);
+    try{localStorage.setItem('rc-theme',n);}catch(e){}
+  });
+  document.querySelectorAll('.copy button[data-c]').forEach(function(b){
+    b.addEventListener('click',function(){
+      var box=b.parentNode.cloneNode(true);box.querySelector('button').remove();
+      var txt=box.textContent.trim();
+      try{navigator.clipboard.writeText(txt);b.textContent='✓ copiado';setTimeout(function(){b.textContent='copiar';},1400);}
+      catch(e){var r=document.createRange();r.selectNodeContents(b.parentNode);var s=getSelection();s.removeAllRanges();s.addRange(r);}
+    });
+  });
+  document.querySelectorAll('input[data-k]').forEach(function(ch){
+    var k='rc-dir-'+ch.getAttribute('data-k');
+    try{if(localStorage.getItem(k)==='1')ch.checked=true;}catch(e){}
+    ch.addEventListener('change',function(){try{localStorage.setItem(k,ch.checked?'1':'0');}catch(e){}});
+  });
+})();
+</script>
