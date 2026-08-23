@@ -15,6 +15,79 @@ import { handleMcp } from "./mcp.mjs";
 import { freeTrial } from "./freetier.mjs";
 import { readMetrics } from "./metrics.mjs";
 import { json, errorResponse, todayDate } from "./util.mjs";
+import { EVAL_CASES } from "./eval-cases.mjs";
+import { clauseInText } from "./text.mjs";
+
+// Examen ciego v2: pasa el banco de casos por el motor de PRODUCCIÓN (vía agent_supplied)
+// y puntúa precisión, cobertura, trampas de honestidad y alucinaciones. Admin-gated.
+async function handleEval(request, env, url) {
+  if (!env.ADMIN_KEY || url.searchParams.get("k") !== env.ADMIN_KEY)
+    return errorResponse("INVALID_INPUT", "Not found.", 404);
+  const from = Math.max(0, parseInt(url.searchParams.get("from") || "0", 10) || 0);
+  const count = parseInt(url.searchParams.get("count") || String(EVAL_CASES.length), 10) || EVAL_CASES.length;
+  const slice = EVAL_CASES.slice(from, from + count);
+
+  const results = [];
+  for (const c of slice) {
+    const req = {
+      product_url: "https://eval.example/p/" + c.id,
+      buyer_country: c.request.buyer_country,
+      item_condition: c.request.item_condition,
+      reason: c.request.reason,
+      purchase_date: c.request.purchase_date,
+      delivery_date: c.request.delivery_date,
+      seller_name: c.request.seller_name,
+      page_text: c.page_text,
+    };
+    let got = "ERROR", policyDays = null, clause = null, viaOk = true, hallucination = false, err = null;
+    try {
+      const resp = await runCheck(env, req);
+      got = resp.verdict;
+      policyDays = resp.policy ? (resp.policy.merchant_return_days ?? null) : null;
+      clause = resp.evidence ? resp.evidence.exact_clause : null;
+      if (got !== "UNKNOWN" && clause) hallucination = !clauseInText(clause, c.page_text);
+    } catch (e) { err = (e && e.message) || "error"; }
+
+    const expected = c.expected.verdict;
+    const correct = got === expected;
+    const determinate = got !== "UNKNOWN" && got !== "ERROR";
+    const daysOk = c.expected.days == null ? null : (policyDays === c.expected.days);
+    let errorType = "ok";
+    if (!correct) errorType = (got === "UNKNOWN") ? "safe_miss" : "UNSAFE";
+    results.push({
+      id: c.id, trap: !!c.trap, expected, got, correct, determinate,
+      expected_days: c.expected.days ?? null, got_days: policyDays, daysOk,
+      hallucination, errorType, error: err, note: c.note,
+    });
+  }
+
+  const n = results.length;
+  const correct = results.filter(r => r.correct).length;
+  const det = results.filter(r => r.determinate).length;
+  const detCorrect = results.filter(r => r.determinate && r.correct).length;
+  const traps = results.filter(r => r.trap);
+  const trapsHeld = traps.filter(r => r.got === "UNKNOWN").length;
+  const halluc = results.filter(r => r.hallucination).length;
+  const safeMiss = results.filter(r => r.errorType === "safe_miss").length;
+  const unsafe = results.filter(r => r.errorType === "UNSAFE").length;
+  const pct = (a, b) => b ? Math.round((a / b) * 1000) / 10 : 0;
+
+  return json({
+    exam: "blind-v2",
+    model: env.AI_MODEL || "default-8b-fast",
+    scope: "production engine via agent_supplied (page_text); verdicts vs hand-verified expected",
+    cases: n,
+    accuracy_pct: pct(correct, n),                 // % veredicto correcto sobre el total
+    coverage_pct: pct(det, n),                     // % con veredicto determinado (no UNKNOWN)
+    precision_determinate_pct: pct(detCorrect, det), // de los determinados, % correctos
+    hallucinations: halluc,                        // cláusulas citadas que NO están en el texto (debe ser 0)
+    unsafe_errors: unsafe,                          // veredicto determinado EQUIVOCADO (lo peligroso)
+    safe_misses: safeMiss,                          // debía ser determinado pero dijo UNKNOWN (conservador)
+    traps_total: traps.length,
+    traps_held: trapsHeld,                          // trampas resueltas con UNKNOWN (bien)
+    results,
+  }, { headers: { "access-control-allow-origin": "*" } });
+}
 
 function bearer(request) {
   const h = request.headers.get("authorization") || "";
@@ -415,6 +488,7 @@ export default {
       if (request.method === "GET" && (p === "/agents.json" || p === "/.well-known/agents.json")) return agentsJson(env);
       // Panel de control (protegido con clave de administrador).
       if (request.method === "GET" && p === "/stats") return await handleStats(request, env, url);
+      if (request.method === "GET" && p === "/eval") return await handleEval(request, env, url);
       if (request.method === "GET" && p === "/dashboard") return dashboardPage(env, url);
       // Ruta de PRUEBA (sin cobro), PROTEGIDA con clave. Para enseñar la demo sin abuso.
       // TODO: quitar del todo antes del lanzamiento público.
@@ -447,7 +521,7 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-23-secretos-rotados",  // marcador de versión para verificar el deploy
+        build: "2026-08-23-examen-ciego-v2",  // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
         free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
