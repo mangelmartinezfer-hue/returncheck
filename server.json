@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mangelmartinezfer-hue/returncheck",
+  "description": "Verified return-policy answers for AI shopping agents: can this product actually be returned?",
+  "repository": {
+    "url": "https://github.com/mangelmartinezfer-hue/returncheck",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://returncheck.m-angelmartinez-fer.workers.dev/mcp"
+    }
+  ]
+}

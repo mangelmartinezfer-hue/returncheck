@@ -11,6 +11,7 @@ import { validateRequest } from "./contract.mjs";
 import { runCheck, EngineError } from "./engine.mjs";
 import { getClient, chargeAtomic, markFree, createClient } from "./billing.mjs";
 import { handleStripeWebhook } from "./stripe.mjs";
+import { handleMcp } from "./mcp.mjs";
 import { json, errorResponse } from "./util.mjs";
 
 function bearer(request) {
@@ -126,6 +127,8 @@ export default {
       if (request.method === "POST" && p === "/v1/agent/check")
         return educated402(env, "Agentic x402 endpoint is wired but not yet enabled (Phase 2). Use /v1/check with an API key.");
       if (request.method === "POST" && p === "/webhooks/stripe") return await handleStripeWebhook(request, env);
+      // Servidor MCP (Streamable HTTP): descubrimiento y llamada de check_return por agentes.
+      if (p === "/mcp") return await handleMcp(request, env);
       // Ruta de PRUEBA (sin cobro), PROTEGIDA con clave. Para enseñar la demo sin abuso.
       // TODO: quitar del todo antes del lanzamiento público.
       if (request.method === "GET" && p === "/demo") {
@@ -156,8 +159,9 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-22-quality3",       // marcador de versión para verificar el deploy
+        build: "2026-08-23-mcp",            // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
+        mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
         browser_fallback: String(env.USE_BROWSER || "false") === "true",
         question: "Can this specific product actually be returned?",
         endpoints: { check: "POST /v1/check", signup: "POST /v1/signup", balance: "GET /v1/balance" },

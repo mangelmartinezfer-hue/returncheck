@@ -1,0 +1,212 @@
+<title>Lista de contactos — ReturnCheck</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --paper:#F3F5F7;--card:#FFFFFF;--ink:#12161C;--muted:#59626F;--hair:#E1E5EA;
+    --accent:#0E7C6B;--accent-ink:#0A5A4E;--accent-wash:#E4F1ED;
+    --a:#0E7C6B;--b:#9A5B08;--c:#5B6472;
+    --a-wash:#E4F1ED;--b-wash:#F6ECDD;--c-wash:#ECEEF1;
+    --shadow:0 1px 2px rgba(18,22,28,.04),0 8px 26px rgba(18,22,28,.05);--maxw:min(900px,92vw);
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --paper:#0D1014;--card:#161B22;--ink:#E7EBF0;--muted:#9BA6B4;--hair:#242B34;
+    --accent:#2FBDA5;--accent-ink:#7FE0D0;--accent-wash:#12241F;
+    --a:#37C08D;--b:#E0A24A;--c:#9BA6B4;--a-wash:#122820;--b-wash:#2A2115;--c-wash:#1B2129;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.4);
+  }}
+  :root[data-theme="dark"]{
+    --paper:#0D1014;--card:#161B22;--ink:#E7EBF0;--muted:#9BA6B4;--hair:#242B34;
+    --accent:#2FBDA5;--accent-ink:#7FE0D0;--accent-wash:#12241F;
+    --a:#37C08D;--b:#E0A24A;--c:#9BA6B4;--a-wash:#122820;--b-wash:#2A2115;--c-wash:#1B2129;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.4);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:var(--maxw);margin-inline:auto}
+  header.top{padding:clamp(2.4rem,6vw,3.4rem) 0 1.2rem}
+  .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--accent-ink);font-weight:500}
+  h1{font-family:"Fraunces",serif;font-weight:700;font-size:clamp(2rem,5vw,2.8rem);
+    letter-spacing:-.02em;margin:.5rem 0 0;line-height:1.08;text-wrap:balance}
+  .sub{color:var(--muted);margin-top:.8rem;max-width:64ch}
+  h2{font-family:"Fraunces",serif;font-weight:600;font-size:clamp(1.35rem,3.2vw,1.8rem);
+    letter-spacing:-.015em;margin:0;text-wrap:balance}
+  section{padding:1.6rem 0;border-top:1px solid var(--hair)}
+  .num{font-family:"IBM Plex Mono",monospace;color:var(--accent-ink);font-size:.78rem;font-weight:500}
+  a{color:var(--accent-ink)}
+  .callout{background:var(--accent-wash);border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);
+    border-radius:12px;padding:1rem 1.15rem;margin-top:1rem}
+  .callout b{color:var(--accent-ink)}
+  .t{display:inline-flex;align-items:center;gap:.3rem;font-family:"IBM Plex Mono",monospace;
+    font-size:.68rem;font-weight:600;letter-spacing:.04em;padding:.18rem .5rem;border-radius:6px}
+  .tA{background:var(--a-wash);color:var(--a)} .tB{background:var(--b-wash);color:var(--b)} .tC{background:var(--c-wash);color:var(--c)}
+  .item{background:var(--card);border:1px solid var(--hair);border-radius:13px;
+    padding:1.05rem 1.15rem;box-shadow:var(--shadow);margin-top:.9rem}
+  .item .h{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;margin-bottom:.35rem}
+  .item .h .name{font-family:"Fraunces",serif;font-weight:600;font-size:1.12rem}
+  .item .what{color:var(--muted);font-size:.92rem;margin:.15rem 0 .5rem}
+  .item .row{font-size:.9rem;margin:.28rem 0}
+  .item .row b{font-weight:600}
+  .k{font-family:"IBM Plex Mono",monospace;font-size:.7rem;text-transform:uppercase;
+    letter-spacing:.06em;color:var(--accent-ink);margin-right:.35rem}
+  .angle{font-family:"IBM Plex Mono",monospace;font-size:.8rem;line-height:1.5;
+    background:var(--paper);border-left:3px solid var(--accent);border-radius:0 8px 8px 0;
+    padding:.55rem .7rem;margin-top:.5rem}
+  .lead{color:var(--muted);font-size:.92rem;margin:.3rem 0 0}
+  footer{padding:2rem 0 3rem;color:var(--muted);font-size:.84rem;border-top:1px solid var(--hair)}
+  .seq{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.8rem}
+  .seq span{font-family:"IBM Plex Mono",monospace;font-size:.8rem;background:var(--card);
+    border:1px solid var(--hair);border-radius:999px;padding:.35rem .75rem}
+</style>
+
+<header class="top wrap">
+  <p class="eyebrow">ReturnCheck · uso interno · verificado ago-2026</p>
+  <h1>Lista de contactos: por dónde empezar</h1>
+  <p class="sub">Objetivos reales y con fuente para pilotos, partners e inversores. Empieza por los <b>Tier A</b>: son donde ReturnCheck ya está técnicamente listo y el encaje es mayor. Nada de correos inventados: donde no hay email público, la vía es LinkedIn/X o el formulario del sitio.</p>
+  <div class="callout">
+    <b>Secuencia recomendada (esta semana):</b>
+    <div class="seq"><span>1 · x402 / Coinbase</span><span>2 · Skyfire</span><span>3 · Rye</span><span>4 · Daydream</span><span>Inversores: a16z crypto · Madrona</span></div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <span class="num">01 · Agentes de compra / checkout (usuarios que pagan)</span>
+    <h2>Los que llamarían a check_return</h2>
+
+    <div class="item">
+      <div class="h"><span class="name">Daydream</span><span class="t tA">TIER A</span></div>
+      <div class="what">Agente de compras de moda con IA, +8.000 marcas. Fundado por Julie Bornstein (ex-COO Stitch Fix, ex-Sephora). $50M seed.</div>
+      <div class="row"><b>Por qué encaja:</b> recomienda entre miles de marcas con políticas dispares; no tiene capa que verifique si un ítem se puede devolver.</div>
+      <div class="row"><span class="k">contacto</span>Julie Bornstein en LinkedIn/X · formulario en daydream</div>
+      <div class="angle">"Your agent recommends across 8,000 brands with wildly different return rules — ReturnCheck gives each pick a verified 'returnable?' verdict with the exact clause, and we never guess (UNKNOWN is free)."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Rye</span><span class="t tA">TIER A</span></div>
+      <div class="what">Universal Checkout API: permite a cualquier agente comprar en cualquier comercio con una URL. También Product Data API.</div>
+      <div class="row"><b>Por qué encaja:</b> es el "brazo ejecutor" de muchos agentes; ReturnCheck es la comprobación pre-compra que les falta. Distribución 1-a-muchos.</div>
+      <div class="row"><span class="k">contacto</span>rye.com (partnerships) · fundadores en LinkedIn</div>
+      <div class="angle">"You solved universal checkout; ReturnCheck adds the universal 'can this be returned?' check right before the buy — one integration, verified clauses, priced per call like your own API."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Firmly.ai</span><span class="t tB">TIER B</span></div>
+      <div class="what">Conecta comercios a canales agénticos sin código ("Firmly Connect"). Inversores: FJ Labs, Ark Invest, Mastercard Start Path.</div>
+      <div class="row"><b>Por qué encaja:</b> normaliza catálogo para agentes; "política verificada por SKU" enriquece su oferta.</div>
+      <div class="row"><span class="k">contacto</span>firmly.ai · fundadores en LinkedIn</div>
+      <div class="angle">"You make merchants agent-ready without code — ReturnCheck makes their return policy machine-verifiable for those same agents."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Perplexity (Buy with Pro)</span><span class="t tB">TIER B</span></div>
+      <div class="what">Asistente de compras dentro de Perplexity; "Buy with Pro" vía PayPal, +5.000 comercios.</div>
+      <div class="row"><b>Por qué encaja:</b> volumen enorme; verificar devoluciones reduce su riesgo reputacional. Realista solo con algo de tracción previa.</div>
+      <div class="row"><span class="k">contacto</span>partnerships Perplexity · gente de producto en X</div>
+      <div class="angle">"Shoppers ask 'can I return this?' constantly — ReturnCheck answers with the verbatim clause and source, so Perplexity never states a rule it can't verify."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Zinc · Phia</span><span class="t tC">TIER C</span></div>
+      <div class="what">Zinc: API de compra para Amazon/Walmart/Target/Best Buy. Phia: app de compras/reventa (Phoebe Gates) — <b>cautela</b>: escándalo de atribución en jul-2026.</div>
+      <div class="row"><b>Por qué:</b> Zinc ejecuta compras en grandes retailers (buen match de datos); Phia, tras su crisis de confianza, "never invent" les vendría bien — pero verifica su situación antes.</div>
+      <div class="row"><span class="k">contacto</span>webs / fundadoras en LinkedIn</div>
+    </div>
+
+    <p class="lead"><b>Aspiracional (Tier C, no contactar en frío aún):</b> OpenAI Instant Checkout, Google AI Mode, Amazon "Buy for Me", Microsoft Copilot Agent Pay. Úsalos como prueba de mercado en el pitch, no como primer email.</p>
+  </section>
+
+  <section>
+    <span class="num">02 · Infra de pagos agente-a-agente (partners + distribución)</span>
+    <h2>Donde ReturnCheck ya está listo técnicamente</h2>
+
+    <div class="item">
+      <div class="h"><span class="name">x402 / Coinbase</span><span class="t tA">TIER A</span></div>
+      <div class="what">Protocolo de pagos HTTP-nativo para agentes (402 + USDC), co-lanzado con Cloudflare. Ecosistema en expansión.</div>
+      <div class="row"><b>Por qué encaja (máximo):</b> ReturnCheck ya es Cloudflare + x402-ready y cobra micro-pagos por consulta — es el caso de uso canónico de x402. La prensa dice que a x402 "le falta demanda real"; tú eres demanda real que pueden exhibir.</div>
+      <div class="row"><span class="k">contacto</span>Coinbase Developer Platform / x402 en GitHub y X (developer relations)</div>
+      <div class="angle">"x402 needs live, useful paid endpoints — ReturnCheck is one: agents pay $0.02 in USDC for a verified return verdict. Already on Cloudflare and x402-ready. Feature us."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Skyfire</span><span class="t tA">TIER A</span></div>
+      <div class="what">Red de pagos nativa para agentes (protocolo KYAPay + Agent Checkout). Respaldo de Neuberger Berman, a16z CSX, Coinbase Ventures.</div>
+      <div class="row"><b>Por qué encaja:</b> su red conecta agentes con servicios de pago; ReturnCheck es un servicio listo para su catálogo.</div>
+      <div class="row"><span class="k">contacto</span>skyfire.xyz · Amir Sarhangi y equipo en LinkedIn/X</div>
+      <div class="angle">"Skyfire lets agents pay for services — ReturnCheck is a plug-and-play one to list: verified return checks, billed per call over your rails."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Catena Labs · Nekuda · Crossmint · Basis Theory</span><span class="t tB">TIER B</span></div>
+      <div class="what">Catena (banco nativo IA, Sean Neville, $30M a16z crypto) · Nekuda (wallet de agentes, Madrona/Amex/Visa) · Crossmint (tarjetas agénticas + Visa) · Basis Theory (lidera el Agentic Commerce Consortium).</div>
+      <div class="row"><b>Por qué encaja:</b> todos construyen los rails o estándares del comercio agéntico; ReturnCheck es una "primitiva de confianza" que integrar/referenciar.</div>
+      <div class="row"><span class="k">contacto</span>webs de cada uno · fundadores en LinkedIn · el Consortium (vía Basis Theory)</div>
+      <div class="angle">"You're building how agents transact — verified returnability is a trust primitive that belongs in that stack."</div>
+    </div>
+  </section>
+
+  <section>
+    <span class="num">03 · SaaS de devoluciones / post-compra</span>
+    <h2>Partner de datos o futuro comprador (prioridad menor)</h2>
+    <p class="lead">Su cliente es el comercio, no el agente — no les vendes consultas. Interés: fuente de datos de política verificada, o adquisición estratégica para tener presencia "agente-facing".</p>
+
+    <div class="item">
+      <div class="h"><span class="name">Loop Returns · Narvar · Redo</span><span class="t tB">TIER B</span></div>
+      <div class="what">Loop (líder devoluciones Shopify, $65M B) · Narvar (post-compra enterprise) · Redo (devoluciones+envío Shopify, en crecimiento).</div>
+      <div class="row"><b>Por qué encaja:</b> tienen la relación de política de devolución con miles de marcas; alianza de datos o distribución agente-facing.</div>
+      <div class="row"><span class="k">contacto</span>partnerships en sus webs · liderazgo en LinkedIn (verifica oferta 2026 antes de escribir)</div>
+      <div class="angle">"Agents are about to ask 'can I return this?' at scale — ReturnCheck is the agent-facing API for that; you own the merchant side. Let's talk data/partnership."</div>
+    </div>
+  </section>
+
+  <section>
+    <span class="num">04 · Inversores / ángeles (cheques públicos en tu vecindario)</span>
+    <h2>Ya han puesto dinero exactamente aquí</h2>
+
+    <div class="item">
+      <div class="h"><span class="name">a16z crypto</span><span class="t tA">TIER A</span></div>
+      <div class="what">Lideró la Series A de $30M de Catena Labs; participó en Skyfire (a16z CSX). Tesis explícita en pagos/finanzas de agentes.</div>
+      <div class="row"><span class="k">contacto</span>formulario a16z crypto · partners en X</div>
+      <div class="angle">"You fund the payment rails for agents (Catena, Skyfire) — ReturnCheck is the verified trust layer that rides on top, already live and x402-priced."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Madrona</span><span class="t tA">TIER A</span></div>
+      <div class="what">Lideró el seed de Nekuda (pagos agénticos).</div>
+      <div class="row"><span class="k">contacto</span>madrona.com · partners en LinkedIn/X</div>
+      <div class="angle">"Complementary to Nekuda in your portfolio: they authorize the payment, we verify the purchase is returnable — a natural trust primitive."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Coinbase Ventures · Amex/Visa Ventures · Costanoa · FJ Labs</span><span class="t tB">TIER B</span></div>
+      <div class="what">Coinbase V. (Skyfire, x402) · Amex/Visa Ventures (Nekuda) · Costanoa (Basis Theory) · FJ Labs (Firmly).</div>
+      <div class="row"><span class="k">contacto</span>páginas de ventures / procesos de pitch públicos</div>
+      <div class="angle">"A real, revenue-generating x402 endpoint — exactly the demand the ecosystem you back needs."</div>
+    </div>
+
+    <div class="item">
+      <div class="h"><span class="name">Ángel: Scot Wingo</span><span class="t tC">TIER C</span></div>
+      <div class="what">Fundador de ChannelAdvisor; ahora ReFiBuy (Agentic Commerce Optimization). Operador-ángel muy activo y creíble en comercio agéntico.</div>
+      <div class="row"><span class="k">contacto</span>Scot Wingo en LinkedIn/X (escribe y hace podcast del tema)</div>
+      <div class="angle">"You're optimizing merchants for agents; ReturnCheck answers the return question on the agent side — would value your read on the wedge."</div>
+    </div>
+  </section>
+
+  <section>
+    <span class="num">05 · Avisos de fiabilidad</span>
+    <h2>Verifica antes de escribir</h2>
+    <p class="lead">· <b>Payman, Narvar, Happy Returns, Zinc</b>: reales y relevantes, pero confirma su oferta/estado 2026 en su web antes de contactar (no afirmes de más).<br>
+    · <b>"Encore"</b> (shopping agent): no se pudo verificar una empresa actual inequívoca — excluido para no inventar.<br>
+    · Mapa útil para mantener la lista al día: "Agentic Commerce Landscape 2026" de Rye y Stellagent.</p>
+  </section>
+
+</main>
+
+<footer class="wrap">
+  ReturnCheck · lista de contactos interna · datos verificados con fuente (ago-2026). Actualiza antes de cada envío.
+</footer>

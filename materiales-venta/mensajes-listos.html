@@ -1,0 +1,133 @@
+<title>Mensajes listos — ReturnCheck</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{--paper:#F3F5F7;--card:#FFFFFF;--ink:#12161C;--muted:#59626F;--hair:#E1E5EA;
+    --accent:#0E7C6B;--accent-ink:#0A5A4E;--accent-wash:#E4F1ED;
+    --shadow:0 1px 2px rgba(18,22,28,.04),0 8px 26px rgba(18,22,28,.05);--maxw:min(860px,92vw)}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --paper:#0D1014;--card:#161B22;--ink:#E7EBF0;--muted:#9BA6B4;--hair:#242B34;
+    --accent:#2FBDA5;--accent-ink:#7FE0D0;--accent-wash:#12241F;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.4)}}
+  :root[data-theme="dark"]{--paper:#0D1014;--card:#161B22;--ink:#E7EBF0;--muted:#9BA6B4;--hair:#242B34;
+    --accent:#2FBDA5;--accent-ink:#7FE0D0;--accent-wash:#12241F;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.4)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:var(--maxw);margin-inline:auto}
+  header.top{padding:clamp(2.2rem,6vw,3.2rem) 0 1rem}
+  .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--accent-ink);font-weight:500}
+  h1{font-family:"Fraunces",serif;font-weight:700;font-size:clamp(1.9rem,5vw,2.6rem);
+    letter-spacing:-.02em;margin:.5rem 0 0;line-height:1.1;text-wrap:balance}
+  .sub{color:var(--muted);margin-top:.7rem;max-width:64ch}
+  .callout{background:var(--accent-wash);border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);
+    border-radius:12px;padding:.9rem 1.1rem;margin-top:1rem;font-size:.94rem}
+  .callout b{color:var(--accent-ink)}
+  .msg{background:var(--card);border:1px solid var(--hair);border-radius:14px;
+    box-shadow:var(--shadow);margin-top:1.3rem;overflow:hidden}
+  .mhead{display:flex;align-items:center;justify-content:space-between;gap:.6rem;
+    padding:.8rem 1.1rem;border-bottom:1px solid var(--hair);flex-wrap:wrap}
+  .mhead .name{font-family:"Fraunces",serif;font-weight:600;font-size:1.12rem}
+  .mhead .via{font-family:"IBM Plex Mono",monospace;font-size:.74rem;color:var(--muted)}
+  .body{padding:1rem 1.15rem;font-family:"IBM Plex Mono",monospace;font-size:.82rem;
+    line-height:1.62;white-space:pre-wrap}
+  .tip{padding:.2rem 1.15rem 1rem;color:var(--muted);font-size:.82rem}
+  .tip b{color:var(--accent-ink)}
+  footer{padding:2rem 0 3rem;color:var(--muted);font-size:.84rem;border-top:1px solid var(--hair);margin-top:1.6rem}
+  a{color:var(--accent-ink)}
+</style>
+
+<header class="top wrap">
+  <p class="eyebrow">ReturnCheck · listos para copiar y pegar</p>
+  <h1>Mañana empiezas aquí</h1>
+  <p class="sub">Cuatro mensajes ya personalizados para tus Tier A. Solo cambia [nombre] si sabes a quién escribes, revisa, y envía por el canal indicado. Tu enlace del one-pager ya está metido.</p>
+  <div class="callout"><b>Antes de enviar:</b> abre tu one-pager y confírmalo →
+    <a href="https://claude.ai/code/artifact/ed28ccd8-71bf-420d-9119-3907b32a6811">claude.ai/code/artifact/ed28ccd8…</a>.
+    Recuerda: es privado; para que ellos lo vean tendrás que <b>compartirlo</b> desde el menú de la página (o pegar el texto). Si prefieres, mañana te preparo una versión pública para enlazar.</div>
+</header>
+
+<main class="wrap">
+
+  <div class="msg">
+    <div class="mhead"><span class="name">1 · Coinbase x402</span><span class="via">vía X / Coinbase Developer Platform · developer relations</span></div>
+    <div class="body">Hi [name] — quick one for the x402 team.
+
+ReturnCheck is a live x402-ready endpoint with real demand: AI shopping
+agents pay $0.02 in USDC for a *verified* answer to "can this product be
+returned?" — we return the exact policy clause + source, or UNKNOWN if we
+can't verify (we never guess). Already running on Cloudflare.
+
+I saw the note that x402 needs live, useful paid endpoints — this is one.
+Would you feature it / point agent builders to it? Happy to send a demo key.
+
+One-pager: [pega aquí tu enlace]
+— Miguel</div>
+    <div class="tip"><b>Dónde:</b> x402 en GitHub (issues/discussions), o el equipo de Coinbase Developer Platform en X. Busca "x402" + Coinbase DevRel.</div>
+  </div>
+
+  <div class="msg">
+    <div class="mhead"><span class="name">2 · Skyfire</span><span class="via">vía skyfire.xyz / Amir Sarhangi en LinkedIn</span></div>
+    <div class="body">Hi [name],
+
+Skyfire lets agents pay for services — ReturnCheck is a plug-and-play one
+to list. Agents call it before buying to check if a specific product is
+actually returnable; they get a verified verdict with the exact policy
+clause + source, billed per call over rails like yours. UNKNOWN is free —
+we never invent an answer.
+
+It's live today (Cloudflare edge, ~2s). Worth a 20-min call to see if it
+belongs in your agent-service catalog?
+
+One-pager: [pega aquí tu enlace]
+Thanks,
+Miguel</div>
+    <div class="tip"><b>Dónde:</b> formulario/partnerships en skyfire.xyz, o Amir Sarhangi (co-fundador) en LinkedIn.</div>
+  </div>
+
+  <div class="msg">
+    <div class="mhead"><span class="name">3 · Rye</span><span class="via">vía rye.com (partnerships) / fundadores en LinkedIn</span></div>
+    <div class="body">Hi [name],
+
+Big fan of what Rye did with universal checkout. One thing that sits right
+before the buy: "can this actually be returned?"
+
+ReturnCheck answers exactly that from a product URL — a verified verdict
+with the verbatim policy clause + source, or UNKNOWN if it can't be
+verified (never a guess). One integration on your side, value for every
+agent using Rye. Priced per call, like your own API.
+
+Live now. Open to running a few real queries together?
+
+One-pager: [pega aquí tu enlace]
+— Miguel</div>
+    <div class="tip"><b>Dónde:</b> contacto/partnerships en rye.com; fundadores en LinkedIn.</div>
+  </div>
+
+  <div class="msg">
+    <div class="mhead"><span class="name">4 · Daydream</span><span class="via">vía Julie Bornstein en LinkedIn/X · formulario en daydream</span></div>
+    <div class="body">Hi Julie,
+
+Daydream recommends across thousands of brands — each with different (and
+messy) return rules. ReturnCheck gives every recommendation a verified
+"returnable?" verdict with the exact policy clause + source, so your agent
+never states a return rule it can't back up. If we can't verify, we say
+UNKNOWN (free) rather than guess.
+
+Live today, ~2s per call. Would you be open to piloting it on a handful of
+your top brands and telling us which ones matter most?
+
+One-pager: [pega aquí tu enlace]
+Best,
+Miguel</div>
+    <div class="tip"><b>Dónde:</b> Julie Bornstein en LinkedIn/X, o formulario de contacto de Daydream.</div>
+  </div>
+
+</main>
+
+<footer class="wrap">
+  ReturnCheck · mensajes de arranque · personaliza [nombre] y pega tu enlace antes de enviar. Nunca prometas cobertura total: vende certeza ("cita exacta o UNKNOWN").
+</footer>
