@@ -64,6 +64,9 @@ function llmsTxt(env) {
 ## Input
 - product_url (required), buyer_country (required, ISO alpha-2)
 - optional: item_condition, reason, purchase_date, delivery_date, merchant, seller_name
+- optional: page_html or page_text — if you already have the product/policy page
+  rendered, pass it and we verify against it (best coverage; bypasses sites that
+  block server-side reads). We still never invent: no verifiable clause -> UNKNOWN.
 `;
   return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*" } });
 }
@@ -102,6 +105,8 @@ function openapi(env) {
             delivery_date: { type: "string" },
             merchant: { type: "string" },
             seller_name: { type: "string" },
+            page_html: { type: "string", description: "Optional: raw HTML of the product/policy page you already have. If provided, ReturnCheck verifies against it instead of fetching (best coverage; bypasses anti-bot blocking). Max 4,000,000 chars." },
+            page_text: { type: "string", description: "Optional: plain text of the page (alternative to page_html). Max 4,000,000 chars." },
           },
         },
       },
@@ -143,7 +148,11 @@ async function handleStats(request, env, url) {
     via: {
       structured_data: m.via_structured_data || 0,
       structured_data_jsonld: m.via_structured_data_jsonld || 0,
+      policy_page_jsonld: m.via_policy_page_jsonld || 0,
+      policy_page_parse: m.via_policy_page_parse || 0,
       page_parse: m.via_page_parse || 0,
+      agent_supplied: m.via_agent_supplied || 0,
+      agent_supplied_jsonld: m.via_agent_supplied_jsonld || 0,
       cache: m.via_cache || 0,
     },
     cache_hits: m.cache_hits || 0,
@@ -358,6 +367,7 @@ export default {
             purchase_date: url.searchParams.get("purchase_date") || undefined,
             delivery_date: url.searchParams.get("delivery_date") || undefined,
             seller_name: url.searchParams.get("seller") || undefined,
+            page_text: url.searchParams.get("page_text") || undefined,
           });
           return json(r);
         } catch (e) {
@@ -373,7 +383,7 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-23-cobertura-policy-discovery",  // marcador de versión para verificar el deploy
+        build: "2026-08-23-agent-supplied-page",  // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
         free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",

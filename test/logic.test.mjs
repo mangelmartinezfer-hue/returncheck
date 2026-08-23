@@ -257,3 +257,18 @@ test("guessedPolicyUrls devuelve rutas comunes sobre el origin", () => {
 test("guessedPolicyUrls con URL inválida -> vacío", () => {
   assert.deepEqual(guessedPolicyUrls("no-es-url"), []);
 });
+
+// ---------- Contenido aportado por el agente (page_html / page_text) ----------
+test("validateRequest acepta page_text / page_html opcionales", () => {
+  const r = validateRequest({ product_url: "https://x.com/p/1", buyer_country: "US", page_text: "Returns within 30 days." });
+  assert.equal(r.ok, true);
+  assert.equal(r.value.page_text, "Returns within 30 days.");
+  const h = validateRequest({ product_url: "https://x.com/p/1", buyer_country: "US", page_html: "<p>Returns within 30 days.</p>" });
+  assert.equal(h.ok, true);
+  assert.equal(h.value.page_html, "<p>Returns within 30 days.</p>");
+});
+test("validateRequest rechaza page_html no-string o gigante", () => {
+  assert.equal(validateRequest({ product_url: "https://x.com/p/1", buyer_country: "US", page_html: 123 }).ok, false);
+  const huge = "a".repeat(4_000_001);
+  assert.equal(validateRequest({ product_url: "https://x.com/p/1", buyer_country: "US", page_text: huge }).ok, false);
+});

@@ -10,7 +10,8 @@ export function validateRequest(body) {
   if (!body || typeof body !== "object")
     return { ok: false, code: "INVALID_INPUT", message: "Body must be a JSON object." };
 
-  const { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name } = body;
+  const { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name,
+          page_html, page_text } = body;
 
   if (typeof product_url !== "string" || !/^https?:\/\//i.test(product_url))
     return { ok: false, code: "INVALID_INPUT", message: "product_url is required and must be an http(s) URL." };
@@ -37,7 +38,16 @@ export function validateRequest(body) {
   if (seller_name !== undefined && typeof seller_name !== "string")
     return { ok: false, code: "INVALID_INPUT", message: "seller_name must be a string." };
 
-  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name } };
+  // ADITIVO v1.0 (no rompe): el agente comprador puede pasarnos el contenido de la
+  // página que YA tiene delante (su navegador sí renderiza JS y no está bloqueado).
+  // Si viene, el motor VERIFICA sobre ese contenido en vez de leer la web.
+  const MAX_PAGE = 4_000_000; // 4M caracteres (el motor recorta a MAX_HTML_BYTES)
+  if (page_html !== undefined && (typeof page_html !== "string" || page_html.length > MAX_PAGE))
+    return { ok: false, code: "INVALID_INPUT", message: "page_html must be a string under 4,000,000 chars." };
+  if (page_text !== undefined && (typeof page_text !== "string" || page_text.length > MAX_PAGE))
+    return { ok: false, code: "INVALID_INPUT", message: "page_text must be a string under 4,000,000 chars." };
+
+  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name, page_html, page_text } };
 }
 
 // Invariantes del contrato (sección 7). Defensa antes de responder: si el motor

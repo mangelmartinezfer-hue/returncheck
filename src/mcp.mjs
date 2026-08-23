@@ -30,6 +30,8 @@ const TOOL = {
       delivery_date: { type: "string", description: "YYYY-MM-DD (optional; preferred for the deadline)." },
       merchant: { type: "string" },
       seller_name: { type: "string" },
+      page_html: { type: "string", description: "Optional: raw HTML of the page you already have. If provided, ReturnCheck verifies against it instead of fetching — best coverage, bypasses sites that block server-side reads. Still never invents: no verifiable clause -> UNKNOWN." },
+      page_text: { type: "string", description: "Optional: plain text of the page (alternative to page_html)." },
     },
     required: ["product_url", "buyer_country"],
   },

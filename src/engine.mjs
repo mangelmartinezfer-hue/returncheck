@@ -340,20 +340,34 @@ export async function runCheck(env, req) {
   const t0 = Date.now();
   const key = cacheKey(req);
   const ttlDays = Number(env.CACHE_TTL_DAYS || "7");
+  // ¿Nos pasó el agente el contenido de la página? Entonces verificamos SOBRE eso.
+  const agentSupplied = !!(req.page_html || req.page_text);
 
-  // 1) Caché
-  const cached = await env.DB.prepare(
-    "SELECT payload, expires_at FROM policy_cache WHERE cache_key = ?"
-  ).bind(key).first().catch(() => null);
-  if (cached && cached.expires_at > todayDate()) {
-    const resp = JSON.parse(cached.payload);
-    resp.meta = { cache_hit: true, response_ms: Date.now() - t0, checked_via: "cache" };
-    await recordCheck(env, resp);
-    return applyDeadline(resp, req);
+  // 1) Caché — NO se usa cuando el contenido lo aporta el agente (evita que una
+  //    página aportada "contamine" el resultado cacheado para otros, y evita mezclar
+  //    un veredicto de lectura real con uno de contenido aportado).
+  if (!agentSupplied) {
+    const cached = await env.DB.prepare(
+      "SELECT payload, expires_at FROM policy_cache WHERE cache_key = ?"
+    ).bind(key).first().catch(() => null);
+    if (cached && cached.expires_at > todayDate()) {
+      const resp = JSON.parse(cached.payload);
+      resp.meta = { cache_hit: true, response_ms: Date.now() - t0, checked_via: "cache" };
+      await recordCheck(env, resp);
+      return applyDeadline(resp, req);
+    }
   }
 
-  // 2) Leer página de producto (conservamos el HTML crudo para los datos estructurados)
-  const { text: prodText, via, fetch_ms, html: prodHtml } = await fetchPolicyText(env, req.product_url);
+  // 2) Obtener el contenido de la página: aportado por el agente, o leído por nosotros.
+  let prodText, via, fetch_ms = 0, prodHtml;
+  if (agentSupplied) {
+    prodHtml = String(req.page_html || "").slice(0, MAX_HTML_BYTES);
+    const rawText = req.page_text ? String(req.page_text) : htmlToText(prodHtml);
+    prodText = focusPolicyText(rawText);
+    via = "agent_supplied";
+  } else {
+    ({ text: prodText, via, fetch_ms, html: prodHtml } = await fetchPolicyText(env, req.product_url));
+  }
 
   // Ayudante: intenta el camino JSON-LD sobre un HTML dado; si sale, cachea y responde.
   const tryJsonLd = async (html, sourceUrl, checked_via) => {
@@ -363,23 +377,27 @@ export async function runCheck(env, req) {
       cache_hit: false, response_ms: Date.now() - t0, checked_via, fetch_ms,
     }, sourceUrl);
     if (!built || !checkInvariants(built).ok) return null;
-    const toCacheLd = JSON.parse(JSON.stringify(built));
-    if (toCacheLd.policy) toCacheLd.policy.deadline_date = null;
-    env.DB.prepare(
-      "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
-    ).bind(key, JSON.stringify(toCacheLd), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
+    if (!agentSupplied) {   // no cacheamos veredictos basados en contenido aportado
+      const toCacheLd = JSON.parse(JSON.stringify(built));
+      if (toCacheLd.policy) toCacheLd.policy.deadline_date = null;
+      env.DB.prepare(
+        "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
+      ).bind(key, JSON.stringify(toCacheLd), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
+    }
     await recordCheck(env, built);
     return applyDeadline(built, req);
   };
 
-  // 3a) Datos estructurados en la propia página de producto (fundamentado, sin IA).
-  const fromProduct = await tryJsonLd(prodHtml, req.product_url, "structured_data_jsonld");
+  // 3a) Datos estructurados en la página (fundamentado, sin IA).
+  const fromProduct = await tryJsonLd(prodHtml, req.product_url,
+    agentSupplied ? "agent_supplied_jsonld" : "structured_data_jsonld");
   if (fromProduct) return fromProduct;
 
   // 3b) COBERTURA: si la página de producto no trae política clara, buscar la página
   // de devoluciones dedicada de la tienda y leerla. Convierte UNKNOWNs en respuestas.
+  // (Solo cuando leemos nosotros: si el agente aportó la página, no salimos a la red.)
   let policyText = prodText, sourceUrl = req.product_url, checked_via = via, discovered_url = null;
-  if (policyKeywordHits(prodText) < WEAK_POLICY_HITS) {
+  if (!agentSupplied && policyKeywordHits(prodText) < WEAK_POLICY_HITS) {
     const found = await discoverPolicyPage(env, req.product_url, prodHtml);
     if (found) {
       discovered_url = found.url;
@@ -415,12 +433,15 @@ export async function runCheck(env, req) {
     resp.reason = "Engine could not produce a valid grounded answer (" + inv.problems.join("; ") + ").";
   }
 
-  // 5) Cachear el extracto (sin deadline por fecha) y recomputar deadline por petición
-  const toCache = JSON.parse(JSON.stringify(resp));
-  if (toCache.policy) toCache.policy.deadline_date = null;
-  env.DB.prepare(
-    "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
-  ).bind(key, JSON.stringify(toCache), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
+  // 5) Cachear el extracto (sin deadline por fecha) y recomputar deadline por petición.
+  //    No cacheamos si el contenido lo aportó el agente (no contaminar a otros).
+  if (!agentSupplied) {
+    const toCache = JSON.parse(JSON.stringify(resp));
+    if (toCache.policy) toCache.policy.deadline_date = null;
+    env.DB.prepare(
+      "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
+    ).bind(key, JSON.stringify(toCache), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
+  }
 
   await recordCheck(env, resp);
   return applyDeadline(resp, req);
