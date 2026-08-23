@@ -272,3 +272,11 @@ test("validateRequest rechaza page_html no-string o gigante", () => {
   const huge = "a".repeat(4_000_001);
   assert.equal(validateRequest({ product_url: "https://x.com/p/1", buyer_country: "US", page_text: huge }).ok, false);
 });
+
+// ---------- SEGURIDAD: cláusula negativa nunca sostiene un veredicto positivo ----------
+test("clauseSupportsVerdict: cláusula negativa NO puede apoyar un YES (hueco C02)", () => {
+  assert.equal(clauseSupportsVerdict("Final sale items cannot be returned or exchanged for any reason.", { verdict: "YES_WITH_CONDITIONS" }), false);
+  assert.equal(clauseSupportsVerdict("This item cannot be returned.", { verdict: "YES" }), false);
+  // La misma cláusula negativa SÍ sostiene un NO.
+  assert.equal(clauseSupportsVerdict("Final sale items cannot be returned or exchanged for any reason.", { verdict: "NO" }), true);
+});
