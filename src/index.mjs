@@ -13,7 +13,8 @@ import { getClient, chargeAtomic, markFree, createClient } from "./billing.mjs";
 import { handleStripeWebhook } from "./stripe.mjs";
 import { handleMcp } from "./mcp.mjs";
 import { freeTrial } from "./freetier.mjs";
-import { json, errorResponse } from "./util.mjs";
+import { readMetrics } from "./metrics.mjs";
+import { json, errorResponse, todayDate } from "./util.mjs";
 
 function bearer(request) {
   const h = request.headers.get("authorization") || "";
@@ -107,6 +108,61 @@ function openapi(env) {
     },
   };
   return json(spec, { headers: { "access-control-allow-origin": "*" } });
+}
+
+// ---- Panel de control: métricas reales del proyecto ----
+async function handleStats(request, env, url) {
+  if (!env.ADMIN_KEY || url.searchParams.get("k") !== env.ADMIN_KEY)
+    return errorResponse("INVALID_INPUT", "Not found.", 404);
+
+  const price = Number(env.PRICE_USD || "0.02");
+  const cl = await env.DB.prepare(
+    "SELECT COUNT(*) c, COALESCE(SUM(calls_charged),0) charged, COALESCE(SUM(calls_free),0) free, COALESCE(SUM(balance_usd),0) bal FROM clients"
+  ).first().catch(() => ({ c: 0, charged: 0, free: 0, bal: 0 }));
+  const cache = await env.DB.prepare("SELECT COUNT(*) c FROM policy_cache").first().catch(() => ({ c: 0 }));
+  const freeToday = await env.DB.prepare("SELECT value v FROM free_usage WHERE bucket = ?")
+    .bind("global:" + todayDate()).first().catch(() => null);
+  const m = await readMetrics(env);
+
+  const v = {
+    YES: m.verdict_YES || 0,
+    YES_WITH_CONDITIONS: m.verdict_YES_WITH_CONDITIONS || 0,
+    NO: m.verdict_NO || 0,
+    UNKNOWN: m.verdict_UNKNOWN || 0,
+  };
+  const checks = m.checks_total || 0;
+  const determinate = v.YES + v.YES_WITH_CONDITIONS + v.NO;
+
+  return json({
+    updated: todayDate(),
+    clients: cl.c || 0,
+    checks_total: checks,
+    verdicts: v,
+    determinate_rate: checks ? Math.round((determinate / checks) * 100) : 0,
+    unknown_rate: checks ? Math.round((v.UNKNOWN / checks) * 100) : 0,
+    via: {
+      structured_data: m.via_structured_data || 0,
+      structured_data_jsonld: m.via_structured_data_jsonld || 0,
+      page_parse: m.via_page_parse || 0,
+      cache: m.via_cache || 0,
+    },
+    cache_hits: m.cache_hits || 0,
+    cached_policies: cache.c || 0,
+    calls_charged: cl.charged || 0,
+    calls_free: cl.free || 0,
+    free_trial_today: freeToday ? freeToday.v : 0,
+    metered_revenue_usd: Math.round((cl.charged || 0) * price * 100) / 100,
+    balance_outstanding_usd: Math.round((cl.bal || 0) * 100) / 100,
+  }, { headers: { "access-control-allow-origin": "*" } });
+}
+
+// Página HTML del panel (la sirve el propio Worker para poder leer /stats).
+function dashboardPage(env, url) {
+  const k = url.searchParams.get("k") || "";
+  if (!env.ADMIN_KEY || k !== env.ADMIN_KEY)
+    return errorResponse("INVALID_INPUT", "Not found.", 404);
+  const html = DASHBOARD_HTML.replace("__KEY__", encodeURIComponent(k));
+  return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 
 async function handleSignup(request, env) {
@@ -205,6 +261,69 @@ async function handleBalance(request, env) {
   });
 }
 
+const DASHBOARD_HTML = `<!doctype html><html lang="es"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReturnCheck — Panel</title>
+<style>
+:root{--bg:#0d1014;--card:#161b22;--ink:#e7ebf0;--mut:#9ba6b4;--hair:#242b34;--acc:#2fbda5;
+--yes:#37c08d;--cond:#e0a24a;--no:#f27363;--unk:#9ba6b4}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;padding:24px;max-width:960px;margin-inline:auto}
+h1{font-size:1.5rem;margin:0 0 2px}.sub{color:var(--mut);font-size:.85rem;margin-bottom:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--hair);border-radius:12px;padding:14px 16px}
+.card .n{font-size:1.9rem;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.card .l{color:var(--mut);font-size:.78rem;text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.sec{margin-top:26px}.sec h2{font-size:1rem;color:var(--mut);font-weight:600;margin:0 0 10px}
+.bar{display:flex;height:26px;border-radius:8px;overflow:hidden;border:1px solid var(--hair)}
+.bar>div{display:flex;align-items:center;justify-content:center;font-size:.72rem;color:#04140f;font-weight:700;min-width:0}
+.legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:.8rem;color:var(--mut)}
+.dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
+button{background:var(--acc);color:#04140f;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:6px}
+td{padding:6px 4px;border-bottom:1px solid var(--hair)}td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+.err{color:var(--no);margin-top:14px}
+</style></head><body>
+<div class="row"><div><h1>ReturnCheck — Panel</h1><div class="sub" id="upd">cargando…</div></div>
+<button onclick="load()">Actualizar</button></div>
+<div class="grid" id="cards"></div>
+<div class="sec"><h2>Veredictos</h2><div class="bar" id="bar"></div><div class="legend" id="legend"></div></div>
+<div class="sec"><h2>Cómo se resolvió (vía)</h2><table id="via"></table></div>
+<div id="err" class="err"></div>
+<script>
+const K="__KEY__";
+function card(n,l){return '<div class="card"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>'}
+async function load(){
+ try{
+  const r=await fetch('/stats?k='+K); if(!r.ok)throw new Error('HTTP '+r.status);
+  const d=await r.json();
+  document.getElementById('upd').textContent='Actualizado: '+d.updated;
+  document.getElementById('err').textContent='';
+  document.getElementById('cards').innerHTML=[
+   card(d.checks_total,'Consultas totales'),
+   card(d.determinate_rate+'%','Con veredicto (no UNKNOWN)'),
+   card(d.clients,'Clientes dados de alta'),
+   card(d.cached_policies,'Políticas en caché'),
+   card(d.free_trial_today,'Pruebas gratis hoy'),
+   card('$'+d.metered_revenue_usd,'Ingreso medido (no real)')
+  ].join('');
+  const v=d.verdicts, tot=Math.max(1,d.checks_total);
+  const seg=[['YES',v.YES,'#37c08d'],['YES_WITH_CONDITIONS',v.YES_WITH_CONDITIONS,'#2fbda5'],['NO',v.NO,'#f27363'],['UNKNOWN',v.UNKNOWN,'#9ba6b4']];
+  document.getElementById('bar').innerHTML=seg.map(s=>{const p=(s[1]/tot*100);return p>0?'<div style="width:'+p+'%;background:'+s[2]+'">'+(p>=8?Math.round(p)+'%':'')+'</div>':''}).join('');
+  document.getElementById('legend').innerHTML=seg.map(s=>'<span><span class="dot" style="background:'+s[2]+'"></span>'+s[0]+': '+s[1]+'</span>').join('');
+  const via=d.via;
+  document.getElementById('via').innerHTML=[
+   ['Datos estructurados (texto)',via.structured_data],
+   ['schema.org JSON-LD',via.structured_data_jsonld],
+   ['Navegador (page_parse)',via.page_parse],
+   ['Caché',d.cache_hits]
+  ].map(x=>'<tr><td>'+x[0]+'</td><td>'+x[1]+'</td></tr>').join('');
+ }catch(e){document.getElementById('err').textContent='Error cargando /stats: '+e.message}
+}
+load();
+</script></body></html>`;
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -221,6 +340,9 @@ export default {
       // Manifiestos de descubrimiento para agentes/crawlers.
       if (request.method === "GET" && p === "/llms.txt") return llmsTxt(env);
       if (request.method === "GET" && (p === "/openapi.json" || p === "/.well-known/openapi.json")) return openapi(env);
+      // Panel de control (protegido con clave de administrador).
+      if (request.method === "GET" && p === "/stats") return await handleStats(request, env, url);
+      if (request.method === "GET" && p === "/dashboard") return dashboardPage(env, url);
       // Ruta de PRUEBA (sin cobro), PROTEGIDA con clave. Para enseñar la demo sin abuso.
       // TODO: quitar del todo antes del lanzamiento público.
       if (request.method === "GET" && p === "/demo") {
@@ -251,7 +373,7 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-23-jsonld",         // marcador de versión para verificar el deploy
+        build: "2026-08-23-dashboard",      // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
         free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",

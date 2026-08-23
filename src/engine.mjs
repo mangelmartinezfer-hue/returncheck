@@ -8,6 +8,7 @@ import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
+import { recordCheck } from "./metrics.mjs";
 
 class EngineError extends Error {
   constructor(code, http, message) { super(message); this.code = code; this.http = http; }
@@ -282,6 +283,7 @@ export async function runCheck(env, req) {
   if (cached && cached.expires_at > todayDate()) {
     const resp = JSON.parse(cached.payload);
     resp.meta = { cache_hit: true, response_ms: Date.now() - t0, checked_via: "cache" };
+    await recordCheck(env, resp);
     return applyDeadline(resp, req);
   }
 
@@ -300,6 +302,7 @@ export async function runCheck(env, req) {
       env.DB.prepare(
         "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
       ).bind(key, JSON.stringify(toCacheLd), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
+      await recordCheck(env, built);
       return applyDeadline(built, req);
     }
   }
@@ -332,6 +335,7 @@ export async function runCheck(env, req) {
     "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
   ).bind(key, JSON.stringify(toCache), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
 
+  await recordCheck(env, resp);
   return applyDeadline(resp, req);
 }
 

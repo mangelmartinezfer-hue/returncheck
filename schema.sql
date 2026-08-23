@@ -51,3 +51,10 @@ CREATE TABLE IF NOT EXISTS free_usage (
   day    TEXT NOT NULL,
   count  INTEGER NOT NULL
 );
+
+-- Contadores de producto para el panel (/dashboard, /stats). Se autocrea.
+-- name = 'checks_total' | 'verdict_YES' | 'via_structured_data_jsonld' | ...
+CREATE TABLE IF NOT EXISTS metrics (
+  name  TEXT PRIMARY KEY,
+  value INTEGER NOT NULL DEFAULT 0
+);
