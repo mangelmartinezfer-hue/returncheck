@@ -22,7 +22,9 @@ VERDICTS: YES_WITH_CONDITIONS (returnable with a window/condition/fee — the co
 
 CONFIDENCE 0..1: 0.85–0.95 when a verbatim clause decides it; 0.60–0.80 when inference is needed; if you cannot honestly reach ~0.80, return UNKNOWN. For UNKNOWN, confidence 0.0.
 
-For a determinate verdict fill policy and evidence. evidence.exact_clause MUST be a verbatim quote copied from the policy text (its own language, never paraphrased). Quote the sentence that directly establishes the verdict; if a number of days applies, quote the sentence that contains that number. A negative clause ("cannot be returned", "final sale") can only support a NO — never a positive verdict. Map item_condition to the enum (opened/used -> UsedCondition when used is accepted; unopened -> NewCondition); never copy the raw request string. In NotPermitted with no refund, refund_type may be null and return_fees null. Include restocking_fee.currency only when type="amount". merchant_return_days: integer or null. Do not compute deadline_date (the caller does it). exceptions[] are short snake_case tags.`;
+Marketplace: if a seller_name is given and the page is the host retailer's own policy, the item is a THIRD-PARTY sale and its returnability is UNKNOWN unless the page states the third-party seller's own policy. Do NOT apply "sold and shipped by us" clauses to a third-party seller.
+
+For a determinate verdict fill policy and evidence. evidence.exact_clause MUST be a verbatim quote copied from the policy text (its own language, never paraphrased). Map item_condition to the enum (opened/used -> UsedCondition when used is accepted; unopened -> NewCondition); never copy the raw request string. In NotPermitted with no refund, refund_type may be null and return_fees null. Include restocking_fee.currency only when type="amount". merchant_return_days: integer or null. Do not compute deadline_date (the caller does it). exceptions[] are short snake_case tags.`;
 
 // Esquema de decodificación restringida (subconjunto que rellena la IA).
 // meta, verified_on y policy_version los pone el código, no el modelo.
