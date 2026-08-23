@@ -261,6 +261,17 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
     resp.reason = "The cited clause could not be verified as supporting the verdict on the page; not asserting a verdict.";
   }
 
+  // SEGURIDAD 3P (determinista, no depende del modelo): si viene un vendedor NOMBRADO
+  // y la política dice que los vendedores terceros/marketplace tienen SU PROPIA política,
+  // no podemos afirmar la del host -> UNKNOWN honesto. Cierra la trampa C06.
+  if (req.seller_name && resp.verdict !== "UNKNOWN" &&
+      /(third[- ]?party|3rd[- ]?party|marketplace seller|each seller'?s own|sold by .{0,30}sellers?)/i.test(policyText)) {
+    resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
+    resp.confidence = 0; resp.policy = null; resp.evidence = null;
+    resp.reason = "Item is sold by a named third-party seller; the page states only the host policy and the seller's own policy is not available.";
+    resp.answer_human = "Unknown. This item is sold by a third-party seller whose own return policy is not on this page.";
+  }
+
   // Reconciliar categoría con veredicto: si es devolvible no puede ser NotPermitted.
   if (resp.policy && resp.verdict !== "NO" && resp.policy.return_category === "NotPermitted") {
     resp.policy.return_category = resp.policy.merchant_return_days != null ? "FiniteReturnWindow" : "UnlimitedWindow";
