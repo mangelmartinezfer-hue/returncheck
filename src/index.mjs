@@ -18,6 +18,9 @@ import { json, errorResponse, todayDate } from "./util.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { clauseInText } from "./text.mjs";
 
+// Marcador de versión único (se usa en / y en /eval para sellar el volcado).
+const BUILD = "2026-08-23-eval-raw";
+
 // Examen ciego v2: pasa el banco de casos por el motor de PRODUCCIÓN (vía agent_supplied)
 // y puntúa precisión, cobertura, trampas de honestidad y alucinaciones. Admin-gated.
 async function handleEval(request, env, url) {
@@ -60,6 +63,10 @@ async function handleEval(request, env, url) {
     results.push({
       id: c.id, trap: !!c.trap, expected, got, correct, determinate,
       expected_days: c.expected.days ?? null, got_days: policyDays, daysOk,
+      cited_clause: clause,
+      unknown_reason: (got === "UNKNOWN")
+        ? (degrade ? ("degraded: cited clause did not support verdict — " + (degrade.rejected_clause || "")) : "model returned UNKNOWN")
+        : null,
       hallucination, errorType, via, degrade, error: err, note: c.note,
     });
   }
@@ -77,8 +84,10 @@ async function handleEval(request, env, url) {
 
   return json({
     exam: "blind-v2",
+    build: BUILD,
+    date: todayDate(),
     model: env.AI_MODEL || "default-8b-fast",
-    scope: "production engine via agent_supplied (page_text); verdicts vs hand-verified expected",
+    scope: "production engine via agent_supplied (page_text); verdicts vs hand-verified expected. Cases authored and run by the ReturnCheck team (not third-party).",
     cases: n,
     accuracy_pct: pct(correct, n),                 // % veredicto correcto sobre el total
     coverage_pct: pct(det, n),                     // % con veredicto determinado (no UNKNOWN)
@@ -524,7 +533,7 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-23-cobertura-prompt",  // marcador de versión para verificar el deploy
+        build: BUILD,      // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
         free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
