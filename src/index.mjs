@@ -12,6 +12,7 @@ import { runCheck, EngineError } from "./engine.mjs";
 import { getClient, chargeAtomic, markFree, createClient } from "./billing.mjs";
 import { handleStripeWebhook } from "./stripe.mjs";
 import { handleMcp } from "./mcp.mjs";
+import { freeTrial } from "./freetier.mjs";
 import { json, errorResponse } from "./util.mjs";
 
 function bearer(request) {
@@ -40,6 +41,74 @@ function educated402(env, note) {
   }, { status: 402 });
 }
 
+// Manifiesto en texto para agentes/LLMs que rastrean el dominio.
+function llmsTxt(env) {
+  const base = env.PUBLIC_BASE_URL || "";
+  const price = Number(env.PRICE_USD || "0.02");
+  const body =
+`# ReturnCheck
+
+> Can this specific product actually be returned? ReturnCheck gives AI shopping
+> agents a verified verdict (YES / YES_WITH_CONDITIONS / NO / UNKNOWN) with the
+> exact policy clause quoted verbatim, source URL, return window and confidence.
+> It never invents: if it cannot verify a clause on the page, it returns UNKNOWN.
+
+## Use it
+- MCP endpoint (Streamable HTTP): ${base}/mcp  (tool: check_return)
+- HTTP: POST ${base}/v1/check  {"product_url":"...","buyer_country":"US"}
+- Free trial: a few calls per day with no API key. Then $${price}/verified query; UNKNOWN is free.
+- Sign up for an API key (free credit): POST ${base}/v1/signup {"email":"..."}
+- OpenAPI: ${base}/openapi.json
+
+## Input
+- product_url (required), buyer_country (required, ISO alpha-2)
+- optional: item_condition, reason, purchase_date, delivery_date, merchant, seller_name
+`;
+  return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*" } });
+}
+
+// OpenAPI mínimo (descubrimiento para agentes/herramientas).
+function openapi(env) {
+  const base = env.PUBLIC_BASE_URL || "";
+  const spec = {
+    openapi: "3.1.0",
+    info: { title: "ReturnCheck", version: "1.0.0", description: "Verified return-policy answers for AI shopping agents. Never invents: returns UNKNOWN instead of guessing." },
+    servers: [{ url: base }],
+    paths: {
+      "/v1/check": {
+        post: {
+          operationId: "check_return",
+          summary: "Can this specific product actually be returned?",
+          description: "Returns a verified verdict with the exact policy clause. No API key = limited free trial; with an API key it costs " + Number(env.PRICE_USD || "0.02") + " USD per useful verdict (UNKNOWN is free).",
+          security: [{}, { bearerAuth: [] }],
+          requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/CheckRequest" } } } },
+          responses: { "200": { description: "Verified answer (contract v1.0)." }, "402": { description: "Payment required / free trial exhausted." } },
+        },
+      },
+    },
+    components: {
+      securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
+      schemas: {
+        CheckRequest: {
+          type: "object",
+          required: ["product_url", "buyer_country"],
+          properties: {
+            product_url: { type: "string", description: "Product page URL (http/https)." },
+            buyer_country: { type: "string", description: "ISO 3166-1 alpha-2, e.g. US." },
+            item_condition: { type: "string", enum: ["unopened", "opened", "used", "defective"] },
+            reason: { type: "string", enum: ["changed_mind", "defective", "wrong_size_or_model", "arrived_late", "other"] },
+            purchase_date: { type: "string" },
+            delivery_date: { type: "string" },
+            merchant: { type: "string" },
+            seller_name: { type: "string" },
+          },
+        },
+      },
+    },
+  };
+  return json(spec, { headers: { "access-control-allow-origin": "*" } });
+}
+
 async function handleSignup(request, env) {
   let body;
   try { body = await request.json(); } catch { return errorResponse("INVALID_INPUT", "Body must be JSON.", 400); }
@@ -60,9 +129,29 @@ async function handleCheck(request, env) {
   const price = Number(env.PRICE_USD || "0.02");
   const chargeOnUnknown = String(env.CHARGE_ON_UNKNOWN || "false") === "true";
 
-  // 1) Autenticación
+  // 1) Autenticación — o tramo de prueba SIN clave (para agentes autónomos).
   const apiKey = bearer(request);
-  if (!apiKey) return educated402(env, "Missing API key. Sign up to get one and top up your balance.");
+  if (!apiKey) {
+    const trial = await freeTrial(env, request);
+    if (!trial.allowed)
+      return educated402(env, "Free trial not available (limit reached or disabled). Sign up for an API key with free credit.");
+    // Entrada válida y consulta gratis (con topes). No se cobra.
+    let body;
+    try { body = await request.json(); } catch { return errorResponse("INVALID_INPUT", "Body must be JSON.", 400); }
+    const v = validateRequest(body);
+    if (!v.ok) return errorResponse(v.code, v.message, 400);
+    let resp;
+    try { resp = await runCheck(env, v.value); }
+    catch (e) {
+      if (e instanceof EngineError) return errorResponse(e.code, e.message, e.http);
+      return errorResponse("INTERNAL", "Unexpected error.", 500);
+    }
+    return json(resp, { headers: {
+      "X-ReturnCheck-Free": "true",
+      "X-Free-Remaining-Today": String(trial.remaining),
+      "X-ReturnCheck-Cost": "0.0000",
+    }});
+  }
   const client = await getClient(env, apiKey);
   if (!client) return errorResponse("INVALID_INPUT", "Unknown API key.", 401);
   if (client.status !== "active") return errorResponse("INVALID_INPUT", "Account is not active.", 403);
@@ -129,6 +218,9 @@ export default {
       if (request.method === "POST" && p === "/webhooks/stripe") return await handleStripeWebhook(request, env);
       // Servidor MCP (Streamable HTTP): descubrimiento y llamada de check_return por agentes.
       if (p === "/mcp") return await handleMcp(request, env);
+      // Manifiestos de descubrimiento para agentes/crawlers.
+      if (request.method === "GET" && p === "/llms.txt") return llmsTxt(env);
+      if (request.method === "GET" && (p === "/openapi.json" || p === "/.well-known/openapi.json")) return openapi(env);
       // Ruta de PRUEBA (sin cobro), PROTEGIDA con clave. Para enseñar la demo sin abuso.
       // TODO: quitar del todo antes del lanzamiento público.
       if (request.method === "GET" && p === "/demo") {
@@ -159,9 +251,10 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-23-mcp",            // marcador de versión para verificar el deploy
+        build: "2026-08-23-freetier",       // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
+        free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
         browser_fallback: String(env.USE_BROWSER || "false") === "true",
         question: "Can this specific product actually be returned?",
         endpoints: { check: "POST /v1/check", signup: "POST /v1/signup", balance: "GET /v1/balance" },

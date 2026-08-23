@@ -1,0 +1,94 @@
+<title>Publicar en el MCP Registry</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{--paper:#F3F5F7;--card:#FFFFFF;--ink:#12161C;--muted:#59626F;--hair:#E1E5EA;
+    --accent:#0E7C6B;--accent-ink:#0A5A4E;--accent-wash:#E4F1ED;--term:#0E1116;--term-ink:#D6E7E0;
+    --shadow:0 1px 2px rgba(18,22,28,.04),0 8px 26px rgba(18,22,28,.05);--maxw:min(820px,92vw)}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --paper:#0D1014;--card:#161B22;--ink:#E7EBF0;--muted:#9BA6B4;--hair:#242B34;
+    --accent:#2FBDA5;--accent-ink:#7FE0D0;--accent-wash:#12241F;--term:#05070A;--term-ink:#CFE3DC;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.4)}}
+  :root[data-theme="dark"]{--paper:#0D1014;--card:#161B22;--ink:#E7EBF0;--muted:#9BA6B4;--hair:#242B34;
+    --accent:#2FBDA5;--accent-ink:#7FE0D0;--accent-wash:#12241F;--term:#05070A;--term-ink:#CFE3DC;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.4)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"IBM Plex Sans",system-ui,sans-serif;font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:var(--maxw);margin-inline:auto}
+  header.top{padding:clamp(2.2rem,6vw,3.2rem) 0 1rem}
+  .eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.18em;
+    text-transform:uppercase;color:var(--accent-ink);font-weight:500}
+  h1{font-family:"Fraunces",serif;font-weight:700;font-size:clamp(1.9rem,5vw,2.6rem);
+    letter-spacing:-.02em;margin:.5rem 0 0;line-height:1.1;text-wrap:balance}
+  .sub{color:var(--muted);margin-top:.7rem;max-width:62ch}
+  h2{font-family:"Fraunces",serif;font-weight:600;font-size:1.2rem;margin:0}
+  .step{background:var(--card);border:1px solid var(--hair);border-radius:13px;
+    padding:1.1rem 1.2rem;box-shadow:var(--shadow);margin-top:1rem}
+  .step .n{font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--accent-ink);
+    font-weight:600;letter-spacing:.06em}
+  .step p{margin:.35rem 0 0;color:var(--muted);font-size:.94rem}
+  pre{background:var(--term);color:var(--term-ink);border-radius:10px;padding:.85rem 1rem;
+    overflow-x:auto;margin:.7rem 0 0;font-family:"IBM Plex Mono",monospace;font-size:.8rem;line-height:1.55}
+  code{font-family:"IBM Plex Mono",monospace}
+  .callout{background:var(--accent-wash);border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);
+    border-radius:12px;padding:1rem 1.15rem;margin-top:1.2rem;font-size:.93rem}
+  .callout b{color:var(--accent-ink)}
+  .warn{border-color:color-mix(in srgb,#B45309 40%,transparent);background:color-mix(in srgb,#B45309 8%,transparent)}
+  footer{padding:2rem 0 3rem;color:var(--muted);font-size:.84rem;border-top:1px solid var(--hair);margin-top:1.6rem}
+</style>
+
+<header class="top wrap">
+  <p class="eyebrow">ReturnCheck · guía de publicación</p>
+  <h1>Publicar en el MCP Registry</h1>
+  <p class="sub">4 pasos que corres tú en tu ordenador (necesitan tu login de GitHub, por eso no puedo hacerlo yo). Al terminar, los agentes que hablan MCP podrán descubrir <code>check_return</code>. Todo desde la carpeta <code>returncheck</code>, en <b>PowerShell</b> (Windows).</p>
+</header>
+
+<main class="wrap">
+
+  <div class="callout"><b>Antes de empezar:</b> abre PowerShell dentro de tu carpeta del proyecto. Truco fácil: abre la carpeta <code>returncheck</code> en el Explorador de archivos, y en la barra de dirección escribe <code>powershell</code> y pulsa Enter. Se abre ya situado en la carpeta.</div>
+
+  <div class="step">
+    <div class="n">PASO 1 · instalar la herramienta mcp-publisher</div>
+    <h2>Descargar el publicador</h2>
+    <p>Pega esto tal cual y pulsa Enter. Descarga un programita al que llamaremos después.</p>
+    <pre>$arch = if ([System.Runtime.InteropServices.RuntimeInformation]::ProcessArchitecture -eq "Arm64") { "arm64" } else { "amd64" }
+Invoke-WebRequest -Uri "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_windows_$arch.tar.gz" -OutFile "mcp-publisher.tar.gz"
+tar xf mcp-publisher.tar.gz mcp-publisher.exe
+Remove-Item mcp-publisher.tar.gz</pre>
+  </div>
+
+  <div class="step">
+    <div class="n">PASO 2 · identificarte con GitHub</div>
+    <h2>Login (te da un código)</h2>
+    <p>Esto abre una identificación por código: te dará algo tipo <code>ABCD-1234</code> y un enlace. Ve al enlace, mete el código, autoriza. Vuelve a PowerShell cuando diga "Successfully authenticated".</p>
+    <pre>.\mcp-publisher login github</pre>
+  </div>
+
+  <div class="step">
+    <div class="n">PASO 3 · publicar la ficha</div>
+    <h2>Enviar server.json al registro</h2>
+    <p>Ya está el <code>server.json</code> en la carpeta (lo preparé yo). Este comando lo publica.</p>
+    <pre>.\mcp-publisher publish</pre>
+    <p>Debe responder algo como <code>✓ Successfully published · io.github.mangelmartinezfer-hue/returncheck 1.0.0</code>.</p>
+  </div>
+
+  <div class="step">
+    <div class="n">PASO 4 · comprobar que estás dentro</div>
+    <h2>Verificar</h2>
+    <p>Pega esto; debe salir tu servidor en el resultado.</p>
+    <pre>curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=returncheck"</pre>
+    <p>Si ves <code>"name":"io.github.mangelmartinezfer-hue/returncheck"</code> en la respuesta, <b>ya estás publicado</b>. Pásame lo que salga y lo confirmo contigo.</p>
+  </div>
+
+  <div class="callout warn"><b>Si algo se atasca:</b> no pasa nada, no rompes nada. Cópiame el error tal cual y te digo el arreglo. Publicar es reversible y actualizable (se puede volver a publicar subiendo la versión). No es urgente hacerlo hoy si estás cansado.</div>
+
+  <div class="callout"><b>Qué NO hace falta:</b> aquí NO se sube nada a npm ni se toca cripto — es un <b>servidor remoto</b>, así que el registro solo guarda la ficha que apunta a tu <code>/mcp</code>. El endpoint ya está vivo y funcionando.</div>
+
+</main>
+
+<footer class="wrap">
+  ReturnCheck · publicar servidor MCP remoto · nombre: io.github.mangelmartinezfer-hue/returncheck · endpoint: /mcp
+</footer>

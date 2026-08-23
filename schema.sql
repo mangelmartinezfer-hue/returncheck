@@ -42,3 +42,12 @@ CREATE TABLE IF NOT EXISTS stripe_events (
   event_id   TEXT PRIMARY KEY,
   created_at TEXT NOT NULL
 );
+
+-- Contadores del tramo de prueba SIN clave (por IP/día y global/día).
+-- El código la crea sola (CREATE IF NOT EXISTS) en la 1ª llamada; se incluye aquí
+-- por documentación. bucket = 'global:YYYY-MM-DD' o 'ip:<hash>:YYYY-MM-DD'.
+CREATE TABLE IF NOT EXISTS free_usage (
+  bucket TEXT PRIMARY KEY,
+  day    TEXT NOT NULL,
+  count  INTEGER NOT NULL
+);

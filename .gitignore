@@ -2,3 +2,6 @@ node_modules/
 _OLD_DELETE_ME/
 .wrangler/
 .dev.vars
+
+mcp-publisher.exe
+mcp-publisher.tar.gz

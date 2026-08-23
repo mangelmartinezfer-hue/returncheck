@@ -7,6 +7,7 @@
 import { validateRequest } from "./contract.mjs";
 import { runCheck, EngineError } from "./engine.mjs";
 import { getClient, chargeAtomic, markFree } from "./billing.mjs";
+import { freeTrial } from "./freetier.mjs";
 
 const DEFAULT_PROTOCOL = "2025-06-18";
 
@@ -43,15 +44,28 @@ function bearer(request) {
 function rpcResult(id, result) { return { jsonrpc: "2.0", id, result }; }
 function rpcError(id, code, message) { return { jsonrpc: "2.0", id, error: { code, message } }; }
 
-// Ejecuta la herramienta check_return (con auth + cobro, igual que /v1/check).
-async function callCheckReturn(args, env, apiKey) {
+// Ejecuta la herramienta check_return (tramo gratis sin clave, o con auth + cobro).
+async function callCheckReturn(args, env, apiKey, request) {
   const price = Number(env.PRICE_USD || "0.02");
   const chargeOnUnknown = String(env.CHARGE_ON_UNKNOWN || "false") === "true";
   const signup = `${env.PUBLIC_BASE_URL || ""}/v1/signup`;
 
-  // Auth: sin clave válida no ejecutamos (evita abuso; x402 llegará en fase 2).
+  // Sin clave: probamos el tramo GRATIS (topes por IP/día y global). Si no queda,
+  // pedimos alta. Esto permite que un agente autónomo pruebe sin registrarse.
   if (!apiKey) {
-    return toolText(`Authentication required. Get a free API key (includes $${Number(env.SIGNUP_FREE_CREDIT_USD || "2").toFixed(2)} of credit) by POSTing your email to ${signup}, then call this tool with 'Authorization: Bearer <key>'. UNKNOWN answers are free; a useful verdict costs $${price}.`, true);
+    const trial = await freeTrial(env, request);
+    if (trial.allowed) {
+      const v = validateRequest(args);
+      if (!v.ok) return toolText("Invalid input: " + v.message, true);
+      try {
+        const resp = await runCheck(env, v.value);
+        return { content: [{ type: "text", text: JSON.stringify(resp) }], structuredContent: resp, isError: false };
+      } catch (e) {
+        if (e instanceof EngineError) return toolText("Engine error (" + e.code + "): " + e.message, true);
+        return toolText("Unexpected engine error.", true);
+      }
+    }
+    return toolText(`Free trial limit reached (or disabled). Get a free API key (includes $${Number(env.SIGNUP_FREE_CREDIT_USD || "2").toFixed(2)} of credit) by POSTing your email to ${signup}, then call with 'Authorization: Bearer <key>'. UNKNOWN answers are free; a useful verdict costs $${price}.`, true);
   }
   const client = await getClient(env, apiKey);
   if (!client) return toolText("Unknown API key. Sign up at " + signup, true);
@@ -91,7 +105,7 @@ function toolText(text, isError) {
 
 // Procesa un mensaje JSON-RPC individual. Devuelve el objeto respuesta, o null
 // si era una notificación (sin id -> no se responde).
-async function handleRpc(msg, env, apiKey) {
+async function handleRpc(msg, env, apiKey, request) {
   const { id, method, params } = msg || {};
   const isNotification = id === undefined || id === null;
 
@@ -110,7 +124,7 @@ async function handleRpc(msg, env, apiKey) {
     case "tools/call": {
       const name = params && params.name;
       if (name !== "check_return") return rpcError(id, -32602, "Unknown tool: " + name);
-      const result = await callCheckReturn((params && params.arguments) || {}, env, apiKey);
+      const result = await callCheckReturn((params && params.arguments) || {}, env, apiKey, request);
       return rpcResult(id, result);
     }
     default:
@@ -143,14 +157,14 @@ export async function handleMcp(request, env) {
   if (Array.isArray(body)) {
     const out = [];
     for (const m of body) {
-      const r = await handleRpc(m, env, apiKey);
+      const r = await handleRpc(m, env, apiKey, request);
       if (r) out.push(r);
     }
     if (out.length === 0) return new Response(null, { status: 202, headers: CORS });
     return jsonRpcHttp(out, 200);
   }
 
-  const r = await handleRpc(body, env, apiKey);
+  const r = await handleRpc(body, env, apiKey, request);
   if (!r) return new Response(null, { status: 202, headers: CORS }); // era notificación
   return jsonRpcHttp(r, 200);
 }
