@@ -6,7 +6,8 @@ import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL } from "./prompt.mjs";
 import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
-import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict } from "./text.mjs";
+import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
+         policyKeywordHits, policyLinkCandidates, guessedPolicyUrls } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
 
@@ -15,6 +16,10 @@ class EngineError extends Error {
 }
 
 const MAX_HTML_BYTES = 240000;   // techo de HTML crudo a procesar (evita matar el proceso)
+
+// Descubrimiento de página de política: cuántas candidatas probar y cuándo activarlo.
+const DISCOVERY_MAX_TRIES = 3;   // nº de páginas de política a intentar (fetch plano)
+const WEAK_POLICY_HITS    = 4;   // si el texto de producto trae < N señales de política, buscamos
 
 // Presupuestos de tiempo (ms): el motor NUNCA debe colgarse hasta el timeout de red.
 const T_PLAIN_FETCH = 6000;   // fetch HTTP plano
@@ -81,6 +86,62 @@ async function fetchPolicyText(env, url) {
   }
 }
 
+// Fetch HTTP plano (sin navegador), con timeout. Para descubrir la página de
+// devoluciones cuando la de producto no trae la política. Devuelve { text, html }
+// o null si no se pudo leer. Nunca lanza (bounded, best-effort).
+async function fetchPlain(env, url) {
+  try {
+    const res = await withTimeout(
+      fetch(url, {
+        headers: {
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+          "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "accept-language": "en-US,en;q=0.9",
+        },
+        redirect: "follow",
+        cf: { cacheTtl: 300, cacheEverything: true },
+      }),
+      T_PLAIN_FETCH, "UPSTREAM_TIMEOUT", "Plain fetch timed out."
+    );
+    if (!res.ok) return null;
+    const html = (await res.text()).slice(0, MAX_HTML_BYTES);
+    return { text: htmlToText(html), html };
+  } catch (_) { return null; }
+}
+
+// Busca y lee la página de devoluciones dedicada de la tienda cuando la página de
+// producto no trae la política. Prueba primero los enlaces del propio HTML (mejor
+// señal) y luego rutas comunes de Shopify/tiendas. Acotado a DISCOVERY_MAX_TRIES.
+// Devuelve la MEJOR página encontrada { text, html, url, hits } o null.
+async function discoverPolicyPage(env, productUrl, productHtml) {
+  const linked = policyLinkCandidates(productHtml || "", productUrl);
+  const guessed = guessedPolicyUrls(productUrl);
+  const seen = new Set([productUrl]);
+  const candidates = [];
+  for (const u of [...linked, ...guessed]) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    candidates.push(u);
+    if (candidates.length >= DISCOVERY_MAX_TRIES) break;
+  }
+  let best = null;
+  for (const url of candidates) {
+    const got = await fetchPlain(env, url);
+    if (!got) continue;
+    const hasLd = /application\/ld\+json/i.test(got.html);
+    const hits = policyKeywordHits(got.text);
+    // Una página con JSON-LD de política, o con muchas señales, es utilizable.
+    if (hasLd || hits >= WEAK_POLICY_HITS) {
+      const cand = { text: focusPolicyText(got.text), html: got.html, url, hits, hasLd };
+      // Preferimos JSON-LD; si no, la de más densidad de señales.
+      if (!best || (cand.hasLd && !best.hasLd) || cand.hits > best.hits) best = cand;
+      // Si ya tenemos JSON-LD fuerte, no seguimos gastando fetches.
+      if (cand.hasLd) break;
+    }
+  }
+  return best;
+}
+
 // Extrae un objeto JSON de la salida del modelo, tolerante a fences y prosa.
 function coerceJson(out) {
   let obj = out && (out.response ?? out);
@@ -129,7 +190,8 @@ async function extract(env, policyText, req) {
 }
 
 // Ensambla la respuesta completa del contrato a partir de lo que devolvió la IA.
-async function assemble(ai, req, policyText, meta) {
+async function assemble(ai, req, policyText, meta, sourceUrl) {
+  const source = sourceUrl || req.product_url;
   const domainFromUrl = (() => { try { return new URL(req.product_url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
   const merchant = ai.merchant_resolved || { name: domainFromUrl, domain: domainFromUrl, is_marketplace_third_party: false };
   if (!merchant.domain) merchant.domain = domainFromUrl;
@@ -176,7 +238,7 @@ async function assemble(ai, req, policyText, meta) {
       seasonal_override: null,
     };
     resp.evidence = {
-      source_url: ai.evidence.source_url || req.product_url,
+      source_url: source,
       exact_clause: ai.evidence.exact_clause,
       verified_on: todayDate(),
       freshness_days: 0,
@@ -216,7 +278,8 @@ async function assemble(ai, req, policyText, meta) {
 // Ensambla una respuesta FUNDAMENTADA a partir de datos estructurados schema.org
 // (JSON-LD MerchantReturnPolicy). Sin IA: los datos están literales en la página.
 // Devuelve resp o null si no es utilizable (fuera de país, categoría no verificable).
-async function assembleFromJsonLd(ld, req, html, meta) {
+async function assembleFromJsonLd(ld, req, html, meta, sourceUrl) {
+  const source = sourceUrl || req.product_url;
   const p = ld.policy;
   // Alcance por país: si la política declara países y el comprador no está -> no afirmamos.
   if (p.applicable_countries && p.applicable_countries.length &&
@@ -259,7 +322,7 @@ async function assembleFromJsonLd(ld, req, html, meta) {
       seasonal_override: null,
     },
     evidence: {
-      source_url: req.product_url,
+      source_url: source,
       exact_clause: ("schema.org MerchantReturnPolicy — " + raw).slice(0, 560),
       verified_on: todayDate(),
       freshness_days: 0,
@@ -287,27 +350,48 @@ export async function runCheck(env, req) {
     return applyDeadline(resp, req);
   }
 
-  // 2) Leer página (conservamos el HTML crudo para los datos estructurados)
-  const { text: policyText, via, fetch_ms, html } = await fetchPolicyText(env, req.product_url);
+  // 2) Leer página de producto (conservamos el HTML crudo para los datos estructurados)
+  const { text: prodText, via, fetch_ms, html: prodHtml } = await fetchPolicyText(env, req.product_url);
 
-  // 3a) Datos estructurados schema.org (JSON-LD MerchantReturnPolicy): fundamentado, sin IA.
-  const ld = html ? findReturnPolicy(extractLdBlocks(html)) : null;
-  if (ld) {
+  // Ayudante: intenta el camino JSON-LD sobre un HTML dado; si sale, cachea y responde.
+  const tryJsonLd = async (html, sourceUrl, checked_via) => {
+    const ld = html ? findReturnPolicy(extractLdBlocks(html)) : null;
+    if (!ld) return null;
     const built = await assembleFromJsonLd(ld, req, html, {
-      cache_hit: false, response_ms: Date.now() - t0, checked_via: "structured_data_jsonld", fetch_ms,
-    });
-    if (built && checkInvariants(built).ok) {
-      const toCacheLd = JSON.parse(JSON.stringify(built));
-      if (toCacheLd.policy) toCacheLd.policy.deadline_date = null;
-      env.DB.prepare(
-        "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
-      ).bind(key, JSON.stringify(toCacheLd), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
-      await recordCheck(env, built);
-      return applyDeadline(built, req);
+      cache_hit: false, response_ms: Date.now() - t0, checked_via, fetch_ms,
+    }, sourceUrl);
+    if (!built || !checkInvariants(built).ok) return null;
+    const toCacheLd = JSON.parse(JSON.stringify(built));
+    if (toCacheLd.policy) toCacheLd.policy.deadline_date = null;
+    env.DB.prepare(
+      "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
+    ).bind(key, JSON.stringify(toCacheLd), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
+    await recordCheck(env, built);
+    return applyDeadline(built, req);
+  };
+
+  // 3a) Datos estructurados en la propia página de producto (fundamentado, sin IA).
+  const fromProduct = await tryJsonLd(prodHtml, req.product_url, "structured_data_jsonld");
+  if (fromProduct) return fromProduct;
+
+  // 3b) COBERTURA: si la página de producto no trae política clara, buscar la página
+  // de devoluciones dedicada de la tienda y leerla. Convierte UNKNOWNs en respuestas.
+  let policyText = prodText, sourceUrl = req.product_url, checked_via = via, discovered_url = null;
+  if (policyKeywordHits(prodText) < WEAK_POLICY_HITS) {
+    const found = await discoverPolicyPage(env, req.product_url, prodHtml);
+    if (found) {
+      discovered_url = found.url;
+      // 3b-i) ¿La página de política trae JSON-LD? Camino fundamentado, citando esa URL.
+      const fromPolicy = await tryJsonLd(found.html, found.url, "policy_page_jsonld");
+      if (fromPolicy) return fromPolicy;
+      // 3b-ii) Si no, usamos su texto (más rico) para el camino IA, citando esa URL.
+      if (found.hits > policyKeywordHits(prodText)) {
+        policyText = found.text; sourceUrl = found.url; checked_via = "policy_page_parse";
+      }
     }
   }
 
-  // 3b) Camino IA sobre texto (si no hubo datos estructurados utilizables)
+  // 3c) Camino IA sobre texto (si no hubo datos estructurados utilizables)
   if (!policyText || policyText.length < 40)
     throw new EngineError("MERCHANT_UNRESOLVED", 422, "Could not read a usable policy from the page.");
   const tAi = Date.now();
@@ -318,8 +402,9 @@ export async function runCheck(env, req) {
   const ai_ms = Date.now() - tAi;
 
   // 4) Ensamblar + invariantes
-  const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via: via, fetch_ms, ai_ms, policy_chars: policyText.length };
-  const resp = await assemble(ai, req, policyText, meta);
+  const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via, fetch_ms, ai_ms, policy_chars: policyText.length };
+  if (discovered_url) meta.discovered_policy_url = discovered_url;
+  const resp = await assemble(ai, req, policyText, meta, sourceUrl);
   const inv = checkInvariants(resp);
   if (!inv.ok) {
     // Nunca reventamos: si el resultado no es válido, degradamos a UNKNOWN honesto.

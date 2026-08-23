@@ -4,7 +4,8 @@ import { validateRequest, checkInvariants } from "../src/contract.mjs";
 import { applyDeadline } from "../src/decision.mjs";
 import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
-import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS } from "../src/text.mjs";
+import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
+         policyKeywordHits, policyLinkCandidates, guessedPolicyUrls } from "../src/text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "../src/jsonld.mjs";
 
 // ---------- Validación de entrada ----------
@@ -213,4 +214,46 @@ test("markFree no toca saldo", async () => {
   await markFree(env, "k");
   assert.equal(env.DB._state.balance, 0.02);
   assert.equal(env.DB._state.free, 1);
+});
+
+// ---------- COBERTURA: descubrimiento de página de política ----------
+test("policyKeywordHits cuenta señales de política (EN + ES)", () => {
+  assert.equal(policyKeywordHits(""), 0);
+  assert.equal(policyKeywordHits("Add to cart. Free shipping worldwide."), 0);
+  assert.ok(policyKeywordHits("Returns accepted within 30 days. Full refund. Exchange available. Reembolso.") >= 4);
+});
+
+test("policyLinkCandidates saca enlaces de política del mismo dominio, ordenados", () => {
+  const html = `
+    <a href="/cart">Cart</a>
+    <a href="/pages/about">About us</a>
+    <a href="/policies/refund-policy">Return & Refund Policy</a>
+    <a href="/returns">Returns</a>
+    <a href="https://otro.com/refund-policy">Otro dominio</a>
+    <a href="/blog/refund-story">Historia sobre refund</a>
+  `;
+  const out = policyLinkCandidates(html, "https://shop.example.com/products/tee");
+  // El primero debe ser el refund-policy (score más alto), y todo mismo host.
+  assert.equal(out[0], "https://shop.example.com/policies/refund-policy");
+  assert.ok(out.every((u) => new URL(u).host === "shop.example.com"));
+  // No cuela el dominio externo.
+  assert.ok(!out.some((u) => u.includes("otro.com")));
+  // Máximo 4.
+  assert.ok(out.length <= 4);
+});
+
+test("policyLinkCandidates: sin enlaces relevantes -> vacío", () => {
+  const html = `<a href="/cart">Cart</a><a href="/login">Login</a>`;
+  assert.deepEqual(policyLinkCandidates(html, "https://x.com/p/1"), []);
+});
+
+test("guessedPolicyUrls devuelve rutas comunes sobre el origin", () => {
+  const g = guessedPolicyUrls("https://shop.example.com/products/tee?variant=1");
+  assert.ok(g.includes("https://shop.example.com/policies/refund-policy"));
+  assert.ok(g.includes("https://shop.example.com/returns"));
+  assert.ok(g.every((u) => u.startsWith("https://shop.example.com/")));
+});
+
+test("guessedPolicyUrls con URL inválida -> vacío", () => {
+  assert.deepEqual(guessedPolicyUrls("no-es-url"), []);
 });

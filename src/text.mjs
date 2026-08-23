@@ -33,6 +33,60 @@ export function htmlToText(html) {
 // Palabras que señalan la sección de política de devolución (EN + ES).
 const POLICY_KW = /\b(return|returns|refund|refunds|exchange|exchanges|restocking|final sale|money[- ]back|devoluc|reembolso|cambio|garant[íi]a|pol[íi]tica)\b/gi;
 
+// Cuenta cuántas palabras clave de política hay (fuerza del texto como política).
+export function policyKeywordHits(text) {
+  if (!text) return 0;
+  const m = text.match(POLICY_KW);
+  return m ? m.length : 0;
+}
+
+// A partir del HTML, saca enlaces (mismo dominio) que apunten a la página de
+// devoluciones/política, ordenados por probabilidad. Para leer la política cuando
+// la página de producto no la trae.
+export function policyLinkCandidates(html, baseUrl) {
+  if (!html) return [];
+  let base;
+  try { base = new URL(baseUrl); } catch { return []; }
+  const re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const rx = /return|refund|devoluc|reembols|policy|policies/i;
+  const seen = new Set();
+  const out = [];
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const href = m[1];
+    const text = m[2].replace(/<[^>]+>/g, " ");
+    if (!rx.test(href) && !rx.test(text)) continue;
+    let abs;
+    try { abs = new URL(href, base).href.split("#")[0]; } catch { continue; }
+    try { if (new URL(abs).host !== base.host) continue; } catch { continue; }
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    out.push(abs);
+  }
+  const score = (u) => {
+    const s = u.toLowerCase();
+    if (s.includes("refund-policy") || s.includes("return-policy") || s.includes("return_policy") || s.includes("returns-policy")) return 4;
+    if (/\/returns?(\b|\/|$)/.test(s) || s.includes("/pages/returns") || s.includes("help/returns")) return 3;
+    if (s.includes("refund") || s.includes("return") || s.includes("devoluc")) return 2;
+    return 1;
+  };
+  out.sort((a, b) => score(b) - score(a));
+  return out.slice(0, 4);
+}
+
+// Rutas comunes de página de política a probar si no hay enlaces claros.
+export function guessedPolicyUrls(baseUrl) {
+  let origin;
+  try { origin = new URL(baseUrl).origin; } catch { return []; }
+  return [
+    origin + "/policies/refund-policy",   // Shopify estándar
+    origin + "/pages/returns",
+    origin + "/returns",
+    origin + "/return-policy",
+    origin + "/pages/return-policy",
+  ];
+}
+
 // Enfoca el texto en la sección de política: si es largo, coge la ventana con más
 // densidad de palabras clave (arregla el corte que dejaba fuera la cláusula).
 export function focusPolicyText(text) {
