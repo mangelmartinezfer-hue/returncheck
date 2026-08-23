@@ -7,6 +7,7 @@ import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict } from "./text.mjs";
+import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 
 class EngineError extends Error {
   constructor(code, http, message) { super(message); this.code = code; this.http = http; }
@@ -51,8 +52,9 @@ async function fetchPolicyText(env, url) {
     if (res.ok) {
       const html = (await res.text()).slice(0, MAX_HTML_BYTES); // cap antes de procesar
       const text = htmlToText(html);
-      if (text && text.length > 200)
-        return { text: focusPolicyText(text), via: "structured_data", fetch_ms: Date.now() - t };
+      const hasLd = /application\/ld\+json/i.test(html); // puede traer MerchantReturnPolicy
+      if ((text && text.length > 200) || hasLd)
+        return { text: focusPolicyText(text), via: "structured_data", fetch_ms: Date.now() - t, html };
     }
   } catch (_) { /* seguimos al navegador */ }
 
@@ -210,6 +212,63 @@ async function assemble(ai, req, policyText, meta) {
   return resp;
 }
 
+// Ensambla una respuesta FUNDAMENTADA a partir de datos estructurados schema.org
+// (JSON-LD MerchantReturnPolicy). Sin IA: los datos están literales en la página.
+// Devuelve resp o null si no es utilizable (fuera de país, categoría no verificable).
+async function assembleFromJsonLd(ld, req, html, meta) {
+  const p = ld.policy;
+  // Alcance por país: si la política declara países y el comprador no está -> no afirmamos.
+  if (p.applicable_countries && p.applicable_countries.length &&
+      !p.applicable_countries.map((c) => String(c).toUpperCase()).includes((req.buyer_country || "").toUpperCase()))
+    return null;
+  const category = p.return_category;
+  // Verificación literal barata: la categoría aparece de verdad en el HTML crudo.
+  if (!String(html).toLowerCase().includes(category.toLowerCase())) return null;
+
+  const verdict = verdictFromCategory(category);
+  const days = p.merchant_return_days;
+  const domain = (() => { try { return new URL(req.product_url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
+  const raw = (ld.raw || "").slice(0, 500);
+
+  return {
+    schema_version: "1.0",
+    verdict,
+    returnable: verdict !== "NO",
+    confidence: 0.9,
+    status: "confirmed",
+    answer_human: verdict === "NO"
+      ? "No. The merchant's published (structured) return policy marks this as not returnable."
+      : (days ? `Yes, with conditions — returnable within ${days} days per the merchant's published return policy.`
+              : "Yes, with conditions under the merchant's published return policy."),
+    reason: null,
+    policy: {
+      return_category: category,
+      merchant_return_days: days ?? null,
+      deadline_date: null,
+      return_country: p.return_country ?? (req.buyer_country || null),
+      applicable_countries: p.applicable_countries || [],
+      return_method: p.return_method || [],
+      return_fees: p.return_fees ?? null,
+      return_shipping_fees_amount: null,
+      restocking_fee: p.restocking_fee ?? null,
+      refund_type: p.refund_type ?? null,
+      item_conditions_accepted: [],
+      required_condition: null,
+      exceptions: [],
+      seasonal_override: null,
+    },
+    evidence: {
+      source_url: req.product_url,
+      exact_clause: ("schema.org MerchantReturnPolicy — " + raw).slice(0, 560),
+      verified_on: todayDate(),
+      freshness_days: 0,
+      policy_version: await sha256hex(raw || category),
+    },
+    merchant_resolved: { name: domain, domain, is_marketplace_third_party: false, seller: null, country: req.buyer_country || null },
+    meta,
+  };
+}
+
 // Punto de entrada. Devuelve la respuesta del contrato (verdict UNKNOWN incluido).
 export async function runCheck(env, req) {
   const t0 = Date.now();
@@ -226,8 +285,26 @@ export async function runCheck(env, req) {
     return applyDeadline(resp, req);
   }
 
-  // 2) Leer página + 3) IA restringida
-  const { text: policyText, via, fetch_ms } = await fetchPolicyText(env, req.product_url);
+  // 2) Leer página (conservamos el HTML crudo para los datos estructurados)
+  const { text: policyText, via, fetch_ms, html } = await fetchPolicyText(env, req.product_url);
+
+  // 3a) Datos estructurados schema.org (JSON-LD MerchantReturnPolicy): fundamentado, sin IA.
+  const ld = html ? findReturnPolicy(extractLdBlocks(html)) : null;
+  if (ld) {
+    const built = await assembleFromJsonLd(ld, req, html, {
+      cache_hit: false, response_ms: Date.now() - t0, checked_via: "structured_data_jsonld", fetch_ms,
+    });
+    if (built && checkInvariants(built).ok) {
+      const toCacheLd = JSON.parse(JSON.stringify(built));
+      if (toCacheLd.policy) toCacheLd.policy.deadline_date = null;
+      env.DB.prepare(
+        "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
+      ).bind(key, JSON.stringify(toCacheLd), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
+      return applyDeadline(built, req);
+    }
+  }
+
+  // 3b) Camino IA sobre texto (si no hubo datos estructurados utilizables)
   if (!policyText || policyText.length < 40)
     throw new EngineError("MERCHANT_UNRESOLVED", 422, "Could not read a usable policy from the page.");
   const tAi = Date.now();

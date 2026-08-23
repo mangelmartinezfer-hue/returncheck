@@ -5,6 +5,7 @@ import { applyDeadline } from "../src/decision.mjs";
 import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
 import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS } from "../src/text.mjs";
+import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "../src/jsonld.mjs";
 
 // ---------- Validación de entrada ----------
 test("request válida pasa", () => {
@@ -130,6 +131,34 @@ test("addDays y normalizeUrl", () => {
 });
 test("newApiKey formato", () => {
   assert.match(newApiKey(), /^rc_live_[0-9a-f]{48}$/);
+});
+
+// ---------- Datos estructurados schema.org (JSON-LD) ----------
+test("extrae MerchantReturnPolicy anidada en Product (hasMerchantReturnPolicy)", () => {
+  const html = `<html><head>
+    <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"Product","name":"Shoe",
+     "offers":{"@type":"Offer","hasMerchantReturnPolicy":{
+       "@type":"MerchantReturnPolicy",
+       "returnPolicyCategory":"https://schema.org/MerchantReturnFiniteReturnWindow",
+       "merchantReturnDays":30,"applicableCountry":"US","returnFees":"https://schema.org/FreeReturn"}}}
+    </script></head><body>x</body></html>`;
+  const ld = findReturnPolicy(extractLdBlocks(html));
+  assert.ok(ld, "debe encontrar la política");
+  assert.equal(ld.policy.return_category, "FiniteReturnWindow");
+  assert.equal(ld.policy.merchant_return_days, 30);
+  assert.equal(verdictFromCategory(ld.policy.return_category), "YES_WITH_CONDITIONS");
+});
+test("detecta NotPermitted -> NO", () => {
+  const html = `<script type="application/ld+json">{"@type":"MerchantReturnPolicy","returnPolicyCategory":"MerchantReturnNotPermitted"}</script>`;
+  const ld = findReturnPolicy(extractLdBlocks(html));
+  assert.equal(ld.policy.return_category, "NotPermitted");
+  assert.equal(verdictFromCategory("NotPermitted"), "NO");
+});
+test("ignora JSON-LD roto y páginas sin política", () => {
+  assert.equal(findReturnPolicy(extractLdBlocks(`<script type="application/ld+json">{roto,,}</script>`)), null);
+  assert.equal(findReturnPolicy(extractLdBlocks(`<script type="application/ld+json">{"@type":"Product","name":"x"}</script>`)), null);
+  assert.equal(findReturnPolicy(extractLdBlocks("<html>sin json</html>")), null);
 });
 
 // ---------- COBRO ATÓMICO (el bug que arreglamos) ----------
