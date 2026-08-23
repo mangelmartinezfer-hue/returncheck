@@ -67,8 +67,70 @@ function llmsTxt(env) {
 - optional: page_html or page_text — if you already have the product/policy page
   rendered, pass it and we verify against it (best coverage; bypasses sites that
   block server-side reads). We still never invent: no verifiable clause -> UNKNOWN.
+
+## Example (HTTP)
+Request:  POST ${base}/v1/check
+  {"product_url":"https://store.example/p/shoe","buyer_country":"US","item_condition":"unopened"}
+Response: {"verdict":"YES_WITH_CONDITIONS","returnable":true,"confidence":0.9,
+  "policy":{"merchant_return_days":30,...},
+  "evidence":{"source_url":"...","exact_clause":"Items may be returned within 30 days...","verified_on":"..."}}
+
+## Why call it
+- Verified, not guessed: every YES/NO carries the exact clause + source URL, or it is UNKNOWN (free).
+- Built for agent-to-agent commerce: MCP tool + x402-friendly micro-pricing ($${price}/verified answer).
+- Neutral: works across merchants; we sell to every shopping agent, we don't compete with them.
+
+## Discovery
+- MCP manifest (tool list): ${base}/mcp
+- OpenAPI: ${base}/openapi.json  ·  Plugin manifest: ${base}/.well-known/ai-plugin.json
+- Agents manifest: ${base}/agents.json
 `;
   return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*" } });
+}
+
+// Manifiesto estilo "plugin" (lo leen varios frameworks/crawlers de agentes).
+function aiPluginJson(env) {
+  const base = env.PUBLIC_BASE_URL || "";
+  const price = Number(env.PRICE_USD || "0.02");
+  const manifest = {
+    schema_version: "v1",
+    name_for_model: "return_check",
+    name_for_human: "ReturnCheck",
+    description_for_model:
+      "Check whether a specific product can actually be returned. Call check_return with a product_url and buyer_country (ISO alpha-2). Returns a verified verdict (YES / YES_WITH_CONDITIONS / NO / UNKNOWN) with the exact policy clause quoted from the page, the source URL, the return window and a confidence score. It NEVER invents: if it cannot verify a clause it returns UNKNOWN (free). If you already have the product/policy page rendered, pass it as page_html or page_text for best coverage. Priced at " + price + " USD per verified answer; UNKNOWN is free; a keyless free trial is available.",
+    description_for_human: "Verified return-policy answers for AI shopping agents. Never guesses.",
+    auth: { type: "none" },
+    api: { type: "openapi", url: base + "/openapi.json" },
+    logo_url: base + "/favicon.ico",
+    contact_email: "hello@returncheck.dev",
+    legal_info_url: base + "/",
+    pricing: { model: "per_call", amount_usd: price, unknown_is_free: true, free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true" },
+  };
+  return json(manifest, { headers: { "access-control-allow-origin": "*" } });
+}
+
+// Manifiesto "agents.json": describe la acción para agentes que lo descubren.
+function agentsJson(env) {
+  const base = env.PUBLIC_BASE_URL || "";
+  const price = Number(env.PRICE_USD || "0.02");
+  const doc = {
+    schema_version: "0.1",
+    name: "ReturnCheck",
+    description: "Verified return-policy answers for AI shopping agents. Never invents: returns UNKNOWN instead of guessing.",
+    url: base,
+    openapi: base + "/openapi.json",
+    mcp: { transport: "streamable_http", url: base + "/mcp", tools: ["check_return"] },
+    pricing: { unit: "per_verified_answer", amount_usd: price, currency: "USD", unknown_is_free: true, payment: ["x402", "prepaid_api_key"] },
+    flows: [{
+      name: "check_return",
+      description: "Can this specific product actually be returned for this buyer?",
+      endpoint: "POST " + base + "/v1/check",
+      required: ["product_url", "buyer_country"],
+      optional: ["item_condition", "reason", "purchase_date", "delivery_date", "merchant", "seller_name", "page_html", "page_text"],
+      returns: ["verdict", "returnable", "confidence", "policy", "evidence.exact_clause", "evidence.source_url"],
+    }],
+  };
+  return json(doc, { headers: { "access-control-allow-origin": "*" } });
 }
 
 // OpenAPI mínimo (descubrimiento para agentes/herramientas).
@@ -349,6 +411,8 @@ export default {
       // Manifiestos de descubrimiento para agentes/crawlers.
       if (request.method === "GET" && p === "/llms.txt") return llmsTxt(env);
       if (request.method === "GET" && (p === "/openapi.json" || p === "/.well-known/openapi.json")) return openapi(env);
+      if (request.method === "GET" && (p === "/.well-known/ai-plugin.json" || p === "/ai-plugin.json")) return aiPluginJson(env);
+      if (request.method === "GET" && (p === "/agents.json" || p === "/.well-known/agents.json")) return agentsJson(env);
       // Panel de control (protegido con clave de administrador).
       if (request.method === "GET" && p === "/stats") return await handleStats(request, env, url);
       if (request.method === "GET" && p === "/dashboard") return dashboardPage(env, url);
@@ -383,7 +447,7 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-23-agent-supplied-page",  // marcador de versión para verificar el deploy
+        build: "2026-08-23-descubrimiento-robots",  // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
         free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
