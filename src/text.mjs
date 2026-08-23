@@ -139,7 +139,7 @@ export function clauseSupportsVerdict(clause, { verdict, days, category } = {}) 
   if (verdict === "NO") return neg;
   // Para un veredicto positivo, la cita debe hablar de DEVOLUCIONES (no de envíos)...
   const mentionsReturns =
-    /\b(return|returns|returned|returnable|refund|refunds|refunded|exchange|exchanges|exchanged)\b/.test(c) ||
+    /\b(return|returns|returned|returnable|refund|refunds|refunded|exchange|exchanges|exchanged|replace|replacement|replaced|store credit|store-credit)\b/.test(c) ||
     /devoluc|reembols|cambio|garant/.test(c);
   if (!mentionsReturns) return false; // p.ej. "Free ground shipping..." -> no vale
   // ...y si hay un nº de días, ese número debe aparecer en la cita.

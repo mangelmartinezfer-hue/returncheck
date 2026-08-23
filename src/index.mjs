@@ -39,12 +39,15 @@ async function handleEval(request, env, url) {
       seller_name: c.request.seller_name,
       page_text: c.page_text,
     };
-    let got = "ERROR", policyDays = null, clause = null, viaOk = true, hallucination = false, err = null;
+    let got = "ERROR", policyDays = null, clause = null, hallucination = false, err = null;
+    let via = null, degrade = null;
     try {
       const resp = await runCheck(env, req);
       got = resp.verdict;
       policyDays = resp.policy ? (resp.policy.merchant_return_days ?? null) : null;
       clause = resp.evidence ? resp.evidence.exact_clause : null;
+      via = resp.meta ? resp.meta.checked_via : null;
+      degrade = resp.meta && resp.meta.degrade ? resp.meta.degrade : null; // por qué se degradó a UNKNOWN
       if (got !== "UNKNOWN" && clause) hallucination = !clauseInText(clause, c.page_text);
     } catch (e) { err = (e && e.message) || "error"; }
 
@@ -57,7 +60,7 @@ async function handleEval(request, env, url) {
     results.push({
       id: c.id, trap: !!c.trap, expected, got, correct, determinate,
       expected_days: c.expected.days ?? null, got_days: policyDays, daysOk,
-      hallucination, errorType, error: err, note: c.note,
+      hallucination, errorType, via, degrade, error: err, note: c.note,
     });
   }
 
@@ -521,7 +524,7 @@ export default {
       }
       if (p === "/") return json({
         name: "ReturnCheck",
-        build: "2026-08-23-examen-ciego-v2",  // marcador de versión para verificar el deploy
+        build: "2026-08-23-cobertura-diag",  // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
         free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
