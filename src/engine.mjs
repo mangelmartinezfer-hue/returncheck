@@ -58,9 +58,11 @@ async function fetchPolicyText(env, url) {
     if (res.ok) {
       const html = (await res.text()).slice(0, MAX_HTML_BYTES); // cap antes de procesar
       const text = htmlToText(html);
-      const hasLd = /application\/ld\+json/i.test(html); // puede traer MerchantReturnPolicy
-      if ((text && text.length > 200) || hasLd)
-        return { text: focusPolicyText(text), via: "structured_data", fetch_ms: Date.now() - t, html };
+      // El fetch funcionó: devolvemos SIEMPRE el HTML aunque el texto sea pobre.
+      // Así, si la página de producto es una cáscara JS, el descubrimiento de la
+      // página de devoluciones (que suele ser HTML estático) puede seguir adelante.
+      // El navegador solo se usa si el fetch falla del todo (abajo).
+      return { text: focusPolicyText(text), via: "structured_data", fetch_ms: Date.now() - t, html };
     }
   } catch (_) { /* seguimos al navegador */ }
 
