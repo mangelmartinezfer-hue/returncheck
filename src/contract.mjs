@@ -11,7 +11,7 @@ export function validateRequest(body) {
     return { ok: false, code: "INVALID_INPUT", message: "Body must be a JSON object." };
 
   const { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name,
-          page_html, page_text } = body;
+          buyer_state, as_of, page_html, page_text } = body;
 
   if (typeof product_url !== "string" || !/^https?:\/\//i.test(product_url))
     return { ok: false, code: "INVALID_INPUT", message: "product_url is required and must be an http(s) URL." };
@@ -19,6 +19,9 @@ export function validateRequest(body) {
 
   if (typeof buyer_country !== "string" || !/^[A-Z]{2}$/.test(buyer_country))
     return { ok: false, code: "INVALID_INPUT", message: "buyer_country is required (ISO 3166-1 alpha-2, e.g. 'US')." };
+
+  if (buyer_state !== undefined && (typeof buyer_state !== "string" || !/^[A-Z]{2}$/.test(buyer_state)))
+    return { ok: false, code: "INVALID_INPUT", message: "buyer_state must be a 2-letter uppercase subdivision code, e.g. 'CA'." };
 
   if (item_condition !== undefined && !ITEM_CONDITIONS.includes(item_condition))
     return { ok: false, code: "INVALID_INPUT", message: "item_condition must be one of " + ITEM_CONDITIONS.join(", ") };
@@ -31,6 +34,9 @@ export function validateRequest(body) {
 
   if (delivery_date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(delivery_date))
     return { ok: false, code: "INVALID_INPUT", message: "delivery_date must be YYYY-MM-DD." };
+
+  if (as_of !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(as_of))
+    return { ok: false, code: "INVALID_INPUT", message: "as_of must be YYYY-MM-DD." };
 
   if (merchant !== undefined && typeof merchant !== "string")
     return { ok: false, code: "INVALID_INPUT", message: "merchant must be a string." };
@@ -47,7 +53,7 @@ export function validateRequest(body) {
   if (page_text !== undefined && (typeof page_text !== "string" || page_text.length > MAX_PAGE))
     return { ok: false, code: "INVALID_INPUT", message: "page_text must be a string under 4,000,000 chars." };
 
-  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name, page_html, page_text } };
+  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name, buyer_state, as_of, page_html, page_text } };
 }
 
 // Invariantes del contrato (sección 7). Defensa antes de responder: si el motor
@@ -76,3 +82,4 @@ export function checkInvariants(r) {
   }
   return { ok: problems.length === 0, problems };
 }
+
