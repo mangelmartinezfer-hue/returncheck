@@ -6,7 +6,8 @@ import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
 import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
          policyKeywordHits, policyLinkCandidates, guessedPolicyUrls,
-         clauseIsJurisdictionConditional, clausePositiveButUnverifiedForOpenedItem } from "../src/text.mjs";
+         clauseIsJurisdictionConditional, policyDefersToSeller,
+         clausePositiveButUnverifiedForOpenedItem } from "../src/text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "../src/jsonld.mjs";
 
 // ---------- Validación de entrada ----------
@@ -314,6 +315,38 @@ test("C09 detecta cláusula condicionada a jurisdicción", () => {
   ), false);
 });
 
+// ---------- SEGURIDAD W01: política delegada al vendedor ----------
+test("W01 detecta 10 formas de delegar la devolución al vendedor", () => {
+  const delegated = [
+    "Products sold by marketplace partners are governed by the individual seller's return policy.",
+    "Third-party sellers set and maintain their own return policies.",
+    "Returns are subject to the seller-specific return policy.",
+    "Each seller's own policy applies to marketplace purchases.",
+    "3rd-party sellers determine their own returns policy.",
+    "Marketplace vendors maintain individual refund policies.",
+    "Return policies vary by seller for marketplace purchases.",
+    "Please check the seller's return policy before buying from a marketplace partner.",
+    "Returns for external sellers are governed by the vendor's policy.",
+    "Items sold by participating sellers are handled under the seller's specific return policy.",
+  ];
+  for (const policy of delegated) {
+    assert.equal(policyDefersToSeller(policy), true, policy);
+  }
+});
+
+test("W01 no confunde menciones de terceros con delegación de política", () => {
+  const hostPolicyApplies = [
+    "Returns are processed by a third-party logistics provider.",
+    "All marketplace sellers follow MarketHub's 30-day return policy.",
+    "Products sold by MarketHub may be returned within 30 days.",
+    "Third-party sellers are eligible for returns within 30 days.",
+    "This return policy applies equally to items sold by marketplace sellers.",
+  ];
+  for (const policy of hostPolicyApplies) {
+    assert.equal(policyDefersToSeller(policy), false, policy);
+  }
+});
+
 // ---------- SEGURIDAD C15: abierto/usado frente a sellado ----------
 test("C15 detecta cita positiva que solo cubre artículos sellados", () => {
   const clause = "Factory-sealed items may be returned within 30 days.";
@@ -325,4 +358,3 @@ test("C15 detecta cita positiva que solo cubre artículos sellados", () => {
     "opened"
   ), false);
 });
-

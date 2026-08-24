@@ -163,6 +163,29 @@ export function clauseIsJurisdictionConditional(clause) {
   return JURISDICTION_CONDITIONAL_RE.test(clause);
 }
 
+// SEGURIDAD W01 (determinista): algunas plataformas publican una política del
+// marketplace, pero dejan la devolución real en manos de cada vendedor. La
+// política del host no demuestra entonces que el producto sea devolvible.
+//
+// Buscamos lenguaje de vendedor/marketplace y, cerca de él, una señal explícita
+// de que la política pertenece al vendedor o es decidida por él. Exigir ambas
+// señales evita falsos positivos como "third-party logistics provider" o
+// "marketplace sellers follow our standard return policy".
+const SELLER_SCOPE_RE = /\b(?:third[- ]?party sellers?|3rd[- ]?party sellers?|marketplace sellers?|marketplace partners?|marketplace vendors?|individual sellers?|external sellers?|sold by[^.!?\n]{0,80}sellers?|sellers?'?s?)\b/gi;
+const SELLER_POLICY_DEFERRAL_RE = /(?:\b(?:each|individual|the)?\s*seller'?s?\s+(?:own|individual|separate|specific)\s+polic(?:y|ies)\b|\b(?:each|individual|the)?\s*seller'?s?\s+(?:own|individual|separate|specific)?\s*(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:their|its)\s+(?:own|individual|separate|specific)\s+(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:seller|vendor|partner)s?\b[^.!?\n]{0,90}\b(?:sets?|provides?|determines?|manages?|governs?|handles?|maintains?|has|have)\b[^.!?\n]{0,70}\b(?:own|separate|individual|specific)?\s*(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:return|refund)s?\s+polic(?:y|ies)\b[^.!?\n]{0,90}\b(?:var(?:y|ies)|differ|set|provided|determined|managed|governed|handled)\b[^.!?\n]{0,70}\b(?:seller|vendor|partner)s?\b|\b(?:subject to|governed by|determined by|set by|handled by|refer to|check|contact)\b[^.!?\n]{0,100}\b(?:seller|vendor|partner)'?s?\b[^.!?\n]{0,80}\b(?:return|refund)?\s*polic(?:y|ies)\b)/i;
+
+export function policyDefersToSeller(policyText) {
+  if (!policyText) return false;
+  const text = String(policyText).replace(/\s+/g, " ");
+  SELLER_SCOPE_RE.lastIndex = 0;
+  for (const match of text.matchAll(SELLER_SCOPE_RE)) {
+    const start = Math.max(0, match.index - 180);
+    const end = Math.min(text.length, match.index + match[0].length + 220);
+    if (SELLER_POLICY_DEFERRAL_RE.test(text.slice(start, end))) return true;
+  }
+  return false;
+}
+
 // SEGURIDAD C15 (determinista): para un item abierto/usado, un veredicto positivo
 // no puede apoyarse SOLO en lenguaje de "nuevo/sellado" -- la cita debe excluir
 // explicitamente esa condicion, o no demuestra lo que el modelo afirma.
