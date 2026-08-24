@@ -314,9 +314,16 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
 // Ensambla una respuesta FUNDAMENTADA a partir de datos estructurados schema.org
 // (JSON-LD MerchantReturnPolicy). Sin IA: los datos están literales en la página.
 // Devuelve resp o null si no es utilizable (fuera de país, categoría no verificable).
-async function assembleFromJsonLd(ld, req, html, meta, sourceUrl) {
+export async function assembleFromJsonLd(ld, req, html, meta, sourceUrl) {
   const source = sourceUrl || req.product_url;
   const p = ld.policy;
+  // SEGURIDAD W01b (cierra el hueco de C06 en la ruta JSON-LD): el schema.org
+  // MerchantReturnPolicy que encontramos en la página no dice a qué vendedor
+  // pertenece -- podría ser la política general del host, que no aplica a un
+  // producto de un vendedor tercero. Si el agente nos dice quién es el vendedor,
+  // esta ruta "barata" no puede confirmar por sí sola; caemos a la ruta de texto,
+  // que sí lee la política completa y aplica el guard de W01 (policyDefersToSeller).
+  if (req.seller_name) return null;
   // Alcance por país: si la política declara países y el comprador no está -> no afirmamos.
   if (p.applicable_countries && p.applicable_countries.length &&
       !p.applicable_countries.map((c) => String(c).toUpperCase()).includes((req.buyer_country || "").toUpperCase()))
