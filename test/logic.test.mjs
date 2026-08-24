@@ -9,6 +9,7 @@ import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POL
          clauseIsJurisdictionConditional, policyDefersToSeller,
          clausePositiveButUnverifiedForOpenedItem } from "../src/text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "../src/jsonld.mjs";
+import { assembleFromJsonLd } from "../src/engine.mjs";
 
 // ---------- Validación de entrada ----------
 test("request válida pasa", () => {
@@ -391,4 +392,33 @@ test("C15 detecta cita positiva que solo cubre artículos sellados", () => {
     "Opened items are not eligible; factory-sealed items may be returned within 30 days.",
     "opened"
   ), false);
+});
+
+// ---------- SEGURIDAD W01b: cierra el hueco C06 en la ruta JSON-LD ----------
+// El schema.org MerchantReturnPolicy que leemos del HTML no dice a qué vendedor
+// pertenece. Si el agente aporta seller_name, esta ruta "barata" no puede confirmar
+// por sí sola: debe devolver null y dejar que la ruta de texto (que sí aplica
+// policyDefersToSeller sobre la política completa) decida.
+const HOST_MRP_HTML = `<html><head>
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"Product","name":"Widget",
+   "offers":{"@type":"Offer","hasMerchantReturnPolicy":{
+     "@type":"MerchantReturnPolicy",
+     "returnPolicyCategory":"https://schema.org/MerchantReturnFiniteReturnWindow",
+     "merchantReturnDays":30,"applicableCountry":"US","returnFees":"https://schema.org/FreeReturn"}}}
+  </script></head><body>MerchantReturnFiniteReturnWindow</body></html>`;
+
+test("W01b: assembleFromJsonLd no confirma sola cuando hay seller_name (deja paso a la ruta de texto)", async () => {
+  const ld = findReturnPolicy(extractLdBlocks(HOST_MRP_HTML));
+  const req = { product_url: "https://store.example/p/1", buyer_country: "US", seller_name: "ThirdPartyLLC" };
+  const out = await assembleFromJsonLd(ld, req, HOST_MRP_HTML, {}, req.product_url);
+  assert.equal(out, null);
+});
+
+test("W01b: assembleFromJsonLd sigue confirmando en el caso normal (sin seller_name)", async () => {
+  const ld = findReturnPolicy(extractLdBlocks(HOST_MRP_HTML));
+  const req = { product_url: "https://store.example/p/1", buyer_country: "US" };
+  const out = await assembleFromJsonLd(ld, req, HOST_MRP_HTML, {}, req.product_url);
+  assert.ok(out, "sin seller_name debe seguir confirmando por JSON-LD (no perder cobertura)");
+  assert.equal(out.verdict, "YES_WITH_CONDITIONS");
 });
