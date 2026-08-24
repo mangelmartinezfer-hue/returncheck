@@ -5,7 +5,8 @@ import { applyDeadline } from "../src/decision.mjs";
 import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
 import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
-         policyKeywordHits, policyLinkCandidates, guessedPolicyUrls } from "../src/text.mjs";
+         policyKeywordHits, policyLinkCandidates, guessedPolicyUrls,
+         clauseIsJurisdictionConditional, clausePositiveButUnverifiedForOpenedItem } from "../src/text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "../src/jsonld.mjs";
 
 // ---------- Validación de entrada ----------
@@ -280,3 +281,48 @@ test("clauseSupportsVerdict: cláusula negativa NO puede apoyar un YES (hueco C0
   // La misma cláusula negativa SÍ sostiene un NO.
   assert.equal(clauseSupportsVerdict("Final sale items cannot be returned or exchanged for any reason.", { verdict: "NO" }), true);
 });
+
+
+test("validateRequest conserva buyer_state y as_of aditivos", () => {
+  const r = validateRequest({
+    product_url: "https://x.com/p/1",
+    buyer_country: "US",
+    buyer_state: "CA",
+    as_of: "2026-08-24",
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.value.buyer_state, "CA");
+  assert.equal(r.value.as_of, "2026-08-24");
+});
+
+test("validateRequest rechaza buyer_state y as_of mal formados", () => {
+  assert.equal(validateRequest({
+    product_url: "https://x.com/p/1", buyer_country: "US", buyer_state: "California",
+  }).ok, false);
+  assert.equal(validateRequest({
+    product_url: "https://x.com/p/1", buyer_country: "US", as_of: "24-08-2026",
+  }).ok, false);
+});
+
+// ---------- SEGURIDAD C09: jurisdicción/ley estatal ----------
+test("C09 detecta cláusula condicionada a jurisdicción", () => {
+  assert.equal(clauseIsJurisdictionConditional(
+    "Returns are not accepted where prohibited by law."
+  ), true);
+  assert.equal(clauseIsJurisdictionConditional(
+    "Eligible items may be returned within 30 days."
+  ), false);
+});
+
+// ---------- SEGURIDAD C15: abierto/usado frente a sellado ----------
+test("C15 detecta cita positiva que solo cubre artículos sellados", () => {
+  const clause = "Factory-sealed items may be returned within 30 days.";
+  assert.equal(clausePositiveButUnverifiedForOpenedItem(clause, "opened"), true);
+  assert.equal(clausePositiveButUnverifiedForOpenedItem(clause, "used"), true);
+  assert.equal(clausePositiveButUnverifiedForOpenedItem(clause, "unopened"), false);
+  assert.equal(clausePositiveButUnverifiedForOpenedItem(
+    "Opened items are not eligible; factory-sealed items may be returned within 30 days.",
+    "opened"
+  ), false);
+});
+
