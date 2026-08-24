@@ -386,7 +386,7 @@ export async function runCheck(env, req) {
       const resp = JSON.parse(cached.payload);
       resp.meta = { cache_hit: true, response_ms: Date.now() - t0, checked_via: "cache" };
       await recordCheck(env, resp);
-      return applyDeadline(resp, req);
+      return applyDeadline(resp, req, req.as_of || todayDate());
     }
   }
 
@@ -417,7 +417,7 @@ export async function runCheck(env, req) {
       ).bind(key, JSON.stringify(toCacheLd), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
     }
     await recordCheck(env, built);
-    return applyDeadline(built, req);
+    return applyDeadline(built, req, req.as_of || todayDate());
   };
 
   // 3a) Datos estructurados en la página (fundamentado, sin IA).
@@ -476,7 +476,7 @@ export async function runCheck(env, req) {
   }
 
   await recordCheck(env, resp);
-  return applyDeadline(resp, req);
+  return applyDeadline(resp, req, req.as_of || todayDate());
 }
 
 export { EngineError };
