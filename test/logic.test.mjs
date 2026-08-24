@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validateRequest, checkInvariants } from "../src/contract.mjs";
-import { applyDeadline } from "../src/decision.mjs";
+import { applyDeadline, windowBasisFromClause, windowDaysFromClause } from "../src/decision.mjs";
 import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
 import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
@@ -39,23 +39,57 @@ test("veredicto determinante exige policy+evidence con fuente", () => {
 
 // ---------- Fecha límite / ventana vencida ----------
 test("recomputa deadline y NO flipea si sigue en ventana", () => {
-  const resp = { verdict: "YES_WITH_CONDITIONS", returnable: true, policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, deadline_date: null } };
+  const resp = { verdict: "YES_WITH_CONDITIONS", returnable: true, policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, window_basis: "purchase_date", deadline_date: null } };
   const out = applyDeadline(structuredClone(resp), { purchase_date: "2026-08-01" }, "2026-08-10");
   assert.equal(out.policy.deadline_date, "2026-08-31");
   assert.equal(out.verdict, "YES_WITH_CONDITIONS");
 });
 test("ventana vencida flipea a NO", () => {
-  const resp = { verdict: "YES_WITH_CONDITIONS", returnable: true, policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, deadline_date: null } };
+  const resp = { verdict: "YES_WITH_CONDITIONS", returnable: true, policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, window_basis: "purchase_date", deadline_date: null } };
   const out = applyDeadline(structuredClone(resp), { purchase_date: "2026-06-01" }, "2026-08-10");
   assert.equal(out.verdict, "NO");
   assert.equal(out.returnable, false);
 });
-test("deadline cuenta desde delivery_date si existe (no desde purchase_date)", () => {
-  const resp = { verdict: "YES_WITH_CONDITIONS", returnable: true, policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, deadline_date: null } };
+test("deadline cuenta desde delivery_date solo cuando la política lo declara", () => {
+  const resp = { verdict: "YES_WITH_CONDITIONS", returnable: true, policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, window_basis: "delivery_date", deadline_date: null } };
   // Compra el 1-jul pero entrega el 1-ago -> deadline debe ser 31-ago, no 31-jul.
   const out = applyDeadline(structuredClone(resp), { purchase_date: "2026-07-01", delivery_date: "2026-08-01" }, "2026-08-10");
   assert.equal(out.policy.deadline_date, "2026-08-31");
   assert.equal(out.verdict, "YES_WITH_CONDITIONS"); // sigue en ventana gracias a la entrega
+});
+
+test("W02 RC25-05 usa purchase_date, extrae 60 días y produce 2027-01-19", () => {
+  const resp = {
+    verdict: "YES_WITH_CONDITIONS", returnable: true,
+    policy: { return_category: "FiniteReturnWindow", merchant_return_days: null, window_basis: "delivery_date", deadline_date: null },
+    evidence: { exact_clause: "Purchases made from November 1 through December 24 may be returned within 60 calendar days of the purchase date." },
+  };
+  const req = { purchase_date: "2026-11-20", delivery_date: "2026-11-25" };
+  const out = applyDeadline(structuredClone(resp), req, "2027-01-10");
+  assert.equal(out.policy.window_basis, "purchase_date");
+  assert.equal(out.policy.merchant_return_days, 60);
+  assert.equal(out.policy.deadline_date, "2027-01-19");
+  assert.equal(out.verdict, "YES_WITH_CONDITIONS");
+});
+
+test("W02 reconoce bases explícitas y rechaza cláusulas ambiguas", () => {
+  assert.equal(windowBasisFromClause("Returns are accepted within 30 days of delivery."), "delivery_date");
+  assert.equal(windowBasisFromClause("Return the product within 14 days after you receive it."), "delivery_date");
+  assert.equal(windowBasisFromClause("Returns are accepted within 30 days after the order date."), "purchase_date");
+  assert.equal(windowBasisFromClause("Returns are accepted within 30 days of purchase or delivery."), null);
+  assert.equal(windowDaysFromClause("Return within 60 calendar days of the purchase date."), 60);
+});
+
+test("W02 no inventa una base cuando la cita no la especifica", () => {
+  const resp = {
+    verdict: "YES_WITH_CONDITIONS", returnable: true,
+    policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, window_basis: "delivery_date", deadline_date: "stale" },
+    evidence: { exact_clause: "Eligible items may be returned within 30 days." },
+  };
+  const out = applyDeadline(structuredClone(resp), { purchase_date: "2026-08-01", delivery_date: "2026-08-05" }, "2026-08-10");
+  assert.equal(out.policy.window_basis, null);
+  assert.equal(out.policy.deadline_date, null);
+  assert.equal(out.verdict, "YES_WITH_CONDITIONS");
 });
 
 // ---------- Verificación LITERAL de la cita (nunca inventar) ----------

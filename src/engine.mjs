@@ -228,6 +228,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
     resp.policy = {
       return_category: ai.policy.return_category,
       merchant_return_days: ai.policy.merchant_return_days ?? null,
+      window_basis: ai.policy.window_basis ?? null,
       deadline_date: null, // se recomputa por petición más abajo
       return_country: ai.policy.return_country ?? (req.buyer_country || null),
       applicable_countries: ai.policy.applicable_countries || [],
@@ -343,6 +344,7 @@ async function assembleFromJsonLd(ld, req, html, meta, sourceUrl) {
     policy: {
       return_category: category,
       merchant_return_days: days ?? null,
+      window_basis: null, // schema.org no declara si cuenta desde compra o entrega
       deadline_date: null,
       return_country: p.return_country ?? (req.buyer_country || null),
       applicable_countries: p.applicable_countries || [],
