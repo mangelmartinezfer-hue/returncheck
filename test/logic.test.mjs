@@ -6,7 +6,8 @@ import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
 import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
          policyKeywordHits, policyLinkCandidates, guessedPolicyUrls,
-         clauseIsJurisdictionConditional, clausePositiveButUnverifiedForOpenedItem } from "../src/text.mjs";
+         clauseIsJurisdictionConditional, policyDefersToSeller,
+         clausePositiveButUnverifiedForOpenedItem } from "../src/text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "../src/jsonld.mjs";
 
 // ---------- Validación de entrada ----------
@@ -312,6 +313,38 @@ test("C09 detecta cláusula condicionada a jurisdicción", () => {
   assert.equal(clauseIsJurisdictionConditional(
     "Eligible items may be returned within 30 days."
   ), false);
+});
+
+// ---------- SEGURIDAD W01: política delegada al vendedor ----------
+test("W01 detecta 10 formas de delegar la devolución al vendedor", () => {
+  const delegated = [
+    "Marketplace Partners have their own return policies.",
+    "Products from marketplace partners are subject to the individual seller's return policy.",
+    "Each seller's own return policy applies to marketplace purchases.",
+    "Third-party sellers provide separate refund policies.",
+    "3rd-party sellers determine their own returns policy.",
+    "Marketplace vendors maintain individual refund policies.",
+    "Return policies vary by seller for marketplace purchases.",
+    "Please check the seller's return policy before buying from a marketplace partner.",
+    "Returns for external sellers are governed by the vendor's policy.",
+    "Items sold by participating sellers are handled under the seller's specific return policy.",
+  ];
+  for (const policy of delegated) {
+    assert.equal(policyDefersToSeller(policy), true, policy);
+  }
+});
+
+test("W01 no confunde menciones de terceros con delegación de política", () => {
+  const hostPolicyApplies = [
+    "Returns are processed by a third-party logistics provider.",
+    "Marketplace seller items follow our standard return policy.",
+    "Products from marketplace partners may be returned within 30 days under this policy.",
+    "Third-party sellers are eligible for returns within 30 days.",
+    "This return policy applies equally to items sold by marketplace sellers.",
+  ];
+  for (const policy of hostPolicyApplies) {
+    assert.equal(policyDefersToSeller(policy), false, policy);
+  }
 });
 
 // ---------- SEGURIDAD C15: abierto/usado frente a sellado ----------
