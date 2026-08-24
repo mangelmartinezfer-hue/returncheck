@@ -7,7 +7,8 @@ import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
-         policyKeywordHits, policyLinkCandidates, guessedPolicyUrls } from "./text.mjs";
+         policyKeywordHits, policyLinkCandidates,
+          clauseIsJurisdictionConditional, clausePositiveButUnverifiedForOpenedItem, guessedPolicyUrls } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
 
@@ -272,6 +273,26 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
     resp.answer_human = "Unknown. This item is sold by a third-party seller whose own return policy is not on this page.";
   }
 
+
+         // SEGURIDAD C09 (determinista): clausula condicionada a la ley del estado y la
+         // request no trae el estado del comprador -> no podemos afirmar. Cierra la trampa C09.
+         if (resp.verdict !== "UNKNOWN" && resp.evidence &&
+             clauseIsJurisdictionConditional(resp.evidence.exact_clause) && !req.buyer_state) {
+                  resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
+                  resp.confidence = 0; resp.policy = null; resp.evidence = null;
+                  resp.reason = "The cited clause conditions the outcome on state/jurisdiction law, and the buyer's state is not provided.";
+                  resp.answer_human = "Unknown. This depends on the buyer's state law, which was not provided.";
+         }
+
+         // SEGURIDAD C15 (determinista): item abierto/usado + cita solo "nuevo/sellado" sin
+         // excluir esa condicion explicitamente -> no esta demostrado. Cierra la trampa C15.
+         if (resp.verdict !== "UNKNOWN" && resp.evidence &&
+             clausePositiveButUnverifiedForOpenedItem(resp.evidence.exact_clause, req.item_condition)) {
+                  resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
+                  resp.confidence = 0; resp.policy = null; resp.evidence = null;
+                  resp.reason = "The cited clause only shows new/sealed-item language; it does not explicitly exclude the opened/used condition of this item.";
+                  resp.answer_human = "Unknown. The cited clause does not clearly cover an opened/used item.";
+         }
   // Reconciliar categoría con veredicto: si es devolvible no puede ser NotPermitted.
   if (resp.policy && resp.verdict !== "NO" && resp.policy.return_category === "NotPermitted") {
     resp.policy.return_category = resp.policy.merchant_return_days != null ? "FiniteReturnWindow" : "UnlimitedWindow";
