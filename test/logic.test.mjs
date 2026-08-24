@@ -318,10 +318,10 @@ test("C09 detecta cláusula condicionada a jurisdicción", () => {
 // ---------- SEGURIDAD W01: política delegada al vendedor ----------
 test("W01 detecta 10 formas de delegar la devolución al vendedor", () => {
   const delegated = [
-    "Marketplace Partners have their own return policies.",
-    "Products from marketplace partners are subject to the individual seller's return policy.",
-    "Each seller's own return policy applies to marketplace purchases.",
-    "Third-party sellers provide separate refund policies.",
+    "Products sold by marketplace partners are governed by the individual seller's return policy.",
+    "Third-party sellers set and maintain their own return policies.",
+    "Returns are subject to the seller-specific return policy.",
+    "Each seller's own policy applies to marketplace purchases.",
     "3rd-party sellers determine their own returns policy.",
     "Marketplace vendors maintain individual refund policies.",
     "Return policies vary by seller for marketplace purchases.",
@@ -337,8 +337,8 @@ test("W01 detecta 10 formas de delegar la devolución al vendedor", () => {
 test("W01 no confunde menciones de terceros con delegación de política", () => {
   const hostPolicyApplies = [
     "Returns are processed by a third-party logistics provider.",
-    "Marketplace seller items follow our standard return policy.",
-    "Products from marketplace partners may be returned within 30 days under this policy.",
+    "All marketplace sellers follow MarketHub's 30-day return policy.",
+    "Products sold by MarketHub may be returned within 30 days.",
     "Third-party sellers are eligible for returns within 30 days.",
     "This return policy applies equally to items sold by marketplace sellers.",
   ];
@@ -358,4 +358,3 @@ test("C15 detecta cita positiva que solo cubre artículos sellados", () => {
     "opened"
   ), false);
 });
-
