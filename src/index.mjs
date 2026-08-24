@@ -19,7 +19,7 @@ import { EVAL_CASES } from "./eval-cases.mjs";
 import { clauseInText } from "./text.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-23-3p-deterministic";
+const BUILD = "2026-08-24-w01-marketplace-guard";
 
 // Examen ciego v2: pasa el banco de casos por el motor de PRODUCCIÓN (vía agent_supplied)
 // y puntúa precisión, cobertura, trampas de honestidad y alucinaciones. Admin-gated.
