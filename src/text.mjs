@@ -150,3 +150,31 @@ export function clauseSupportsVerdict(clause, { verdict, days, category } = {}) 
   if (days != null && !new RegExp("\\b" + days + "\\b").test(c)) return false;
   return true;
 }
+
+
+// SEGURIDAD C09 (determinista): la cita condiciona el resultado a la ley del
+// estado/jurisdiccion del comprador. Si la request no trae ese dato, no podemos
+// afirmar nada -> el llamador debe forzar UNKNOWN aunque el modelo diga otra cosa.
+const JURISDICTION_CONDITIONAL_RE =
+  /(where prohibited by law|except where required by law|subject to (state|local) law|varies by state|as (required|permitted) by (state|applicable) law|where applicable law (requires|permits))/i;
+
+export function clauseIsJurisdictionConditional(clause) {
+  if (!clause) return false;
+  return JURISDICTION_CONDITIONAL_RE.test(clause);
+}
+
+// SEGURIDAD C15 (determinista): para un item abierto/usado, un veredicto positivo
+// no puede apoyarse SOLO en lenguaje de "nuevo/sellado" -- la cita debe excluir
+// explicitamente esa condicion, o no demuestra lo que el modelo afirma.
+const CONDITION_EXCLUSION_RE =
+  /(\bopened\b[\s\S]{0,40}\b(not|cannot|can'?t|no longer|ineligible)\b|\bonce opened\b|\bseal(ed)? (must|is) (be intact|unbroken)\b|\bbroken seal\b|\bunsealed\b[\s\S]{0,20}\b(not eligible|excluded|final sale)\b)/i;
+const SEALED_NEW_LANGUAGE_RE = /\b(new|sealed|unopened)\b/i;
+
+export function clausePositiveButUnverifiedForOpenedItem(clause, itemCondition) {
+  if (!clause) return false;
+  const isOpenedOrUsed = itemCondition === "opened" || itemCondition === "used";
+  if (!isOpenedOrUsed) return false;
+  const hasExclusion = CONDITION_EXCLUSION_RE.test(clause);
+  const hasSealedLanguage = SEALED_NEW_LANGUAGE_RE.test(clause);
+  return hasSealedLanguage && !hasExclusion;
+}
