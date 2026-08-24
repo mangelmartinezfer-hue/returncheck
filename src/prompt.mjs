@@ -24,7 +24,7 @@ CONFIDENCE 0..1: 0.85–0.95 when a verbatim clause decides it; 0.60–0.80 when
 
 Marketplace: if a seller_name is given and the page is the host retailer's own policy, the item is a THIRD-PARTY sale and its returnability is UNKNOWN unless the page states the third-party seller's own policy. Do NOT apply "sold and shipped by us" clauses to a third-party seller.
 
-For a determinate verdict fill policy and evidence. evidence.exact_clause MUST be a verbatim quote copied from the policy text (its own language, never paraphrased). Map item_condition to the enum (opened/used -> UsedCondition when used is accepted; unopened -> NewCondition); never copy the raw request string. In NotPermitted with no refund, refund_type may be null and return_fees null. Include restocking_fee.currency only when type="amount". merchant_return_days: integer or null. Do not compute deadline_date (the caller does it). exceptions[] are short snake_case tags.`;
+For a determinate verdict fill policy and evidence. evidence.exact_clause MUST be a verbatim quote copied from the policy text (its own language, never paraphrased). Map item_condition to the enum (opened/used -> UsedCondition when used is accepted; unopened -> NewCondition); never copy the raw request string. In NotPermitted with no refund, refund_type may be null and return_fees null. Include restocking_fee.currency only when type="amount". merchant_return_days: integer or null. window_basis: "purchase_date" only when the quoted clause explicitly counts from purchase/order, "delivery_date" only when it explicitly counts from delivery/receipt, otherwise null. Never guess the basis from which request dates happen to be present. Do not compute deadline_date (the caller does it). exceptions[] are short snake_case tags.`;
 
 // Esquema de decodificación restringida (subconjunto que rellena la IA).
 // meta, verified_on y policy_version los pone el código, no el modelo.
@@ -43,6 +43,7 @@ export const RESPONSE_SCHEMA = {
       properties: {
         return_category: { type: "string", enum: ["FiniteReturnWindow", "UnlimitedWindow", "NotPermitted"] },
         merchant_return_days: { type: ["integer", "null"], minimum: 0 },
+        window_basis: { type: ["string", "null"], enum: ["purchase_date", "delivery_date", null] },
         return_country: { type: ["string", "null"] },
         applicable_countries: { type: "array", items: { type: "string" } },
         return_method: { type: "array", items: { type: "string", enum: ["ReturnByMail", "ReturnInStore", "ReturnAtKiosk"] } },
@@ -53,7 +54,7 @@ export const RESPONSE_SCHEMA = {
         required_condition: { type: ["string", "null"] },
         exceptions: { type: "array", items: { type: "string" } },
       },
-      required: ["return_category", "return_method", "return_fees", "refund_type"],
+      required: ["return_category", "window_basis", "return_method", "return_fees", "refund_type"],
     },
     evidence: {
       type: ["object", "null"],
