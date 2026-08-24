@@ -8,7 +8,8 @@ import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
          policyKeywordHits, policyLinkCandidates,
-          clauseIsJurisdictionConditional, clausePositiveButUnverifiedForOpenedItem, guessedPolicyUrls } from "./text.mjs";
+          clauseIsJurisdictionConditional, policyDefersToSeller,
+          clausePositiveButUnverifiedForOpenedItem, guessedPolicyUrls } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
 
@@ -266,7 +267,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
   // y la política dice que los vendedores terceros/marketplace tienen SU PROPIA política,
   // no podemos afirmar la del host -> UNKNOWN honesto. Cierra la trampa C06.
   if (req.seller_name && resp.verdict !== "UNKNOWN" &&
-      /(third[- ]?party|3rd[- ]?party|marketplace seller|each seller'?s own|sold by .{0,30}sellers?)/i.test(policyText)) {
+      policyDefersToSeller(policyText)) {
     resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
     resp.confidence = 0; resp.policy = null; resp.evidence = null;
     resp.reason = "Item is sold by a named third-party seller; the page states only the host policy and the seller's own policy is not available.";
