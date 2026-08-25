@@ -7,6 +7,44 @@
 // desde Cloudflare con la variable AI_MODEL (p.ej. probar 70B) sin tocar código.
 export const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
+// W05 — PARÁMETROS DE INFERENCIA. Aquí estaba el agujero.
+//
+// Hasta hoy la llamada a env.AI.run() no pasaba `temperature`. Workers AI usa
+// 0.6 por defecto en generación de texto, así que el motor estaba MUESTREANDO
+// AL AZAR en cada llamada, a propósito, sin que nadie lo hubiera decidido.
+// El holdout del 24 ago midió 11 casos estables de 25 en cinco pasadas; esta es
+// la primera candidata a explicarlo, y nadie la había mirado en cinco días.
+//
+// NO se afirma que sea LA causa: hay más fuentes de variación (enrutado del
+// modelo, lotes, coma flotante). Por eso queda CONFIGURABLE desde el panel de
+// Cloudflare: se puede volver a 0.6 sin desplegar y medir las dos ramas contra
+// el mismo build. Un experimento con una sola variable, que es lo que faltaba.
+export const AI_TEMPERATURE = 0;
+
+// Construye los parámetros de muestreo. Función aparte y exportada A PROPÓSITO:
+// que esto sea comprobable por una prueba es justo lo que faltó para que un
+// parámetro ausente pasara desapercibido cinco días.
+export function inferenceParams(env, attempt = 0) {
+  const params = {};
+
+  const raw = env && env.AI_TEMPERATURE;
+  const t = (raw === undefined || raw === null || raw === "") ? AI_TEMPERATURE : Number(raw);
+  // Un valor basura NO se envía tal cual ni rompe la llamada: se cae al defecto.
+  params.temperature = (Number.isFinite(t) && t >= 0 && t <= 5) ? t : AI_TEMPERATURE;
+
+  // Semilla opcional. Si se fija, el REINTENTO usa una distinta: repetir la misma
+  // semilla tras una salida inválida reproduciría exactamente el mismo fallo.
+  const rawSeed = env && env.AI_SEED;
+  if (rawSeed !== undefined && rawSeed !== null && rawSeed !== "") {
+    const s = Number(rawSeed);
+    if (Number.isInteger(s) && s >= 1 && s <= 9999999999) {
+      params.seed = Math.min(9999999999, s + attempt);
+    }
+  }
+
+  return params;
+}
+
 export const SYSTEM_PROMPT = `You are ReturnCheck's extraction engine. You receive the TEXT of a merchant's published return policy plus a REQUEST about one specific product. Decide whether THIS product can be returned under THESE conditions, and output ONE JSON object matching the given schema. No prose.
 
 ABSOLUTE RULE — NEVER INVENT. If the policy text does not let you decide THIS request with confidence, return verdict "UNKNOWN" with policy=null, evidence=null and a one-sentence reason. UNKNOWN is a correct, valuable answer. A wrong YES/NO is far worse than an honest UNKNOWN.

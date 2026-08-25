@@ -2,7 +2,7 @@
 // respuesta del contrato -> recomputar fecha límite por petición.
 
 import puppeteer from "@cloudflare/puppeteer";
-import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL } from "./prompt.mjs";
+import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL, inferenceParams } from "./prompt.mjs";
 import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
@@ -178,6 +178,7 @@ async function extract(env, policyText, req) {
           messages,
           response_format: { type: "json_schema", json_schema: RESPONSE_SCHEMA },
           max_tokens: 2048,
+          ...inferenceParams(env, attempt),   // W05: temperatura explícita, no la del proveedor
         }),
         T_AI, "UPSTREAM_TIMEOUT", "The extraction model did not respond in time."
       );

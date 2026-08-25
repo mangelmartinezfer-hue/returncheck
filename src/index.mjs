@@ -17,9 +17,10 @@ import { readMetrics } from "./metrics.mjs";
 import { json, errorResponse, todayDate } from "./util.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { clauseInText } from "./text.mjs";
+import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-25-data-policy-notice";
+const BUILD = "2026-08-25-w05-inference-params";
 
 // Examen ciego v2: pasa el banco de casos por el motor de PRODUCCIÓN (vía agent_supplied)
 // y puntúa precisión, cobertura, trampas de honestidad y alucinaciones. Admin-gated.
@@ -615,6 +616,7 @@ export default {
         name: "ReturnCheck",
         build: BUILD,      // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
+        temperature: inferenceParams(env).temperature,   // W05: qué rama del experimento está viva
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
         data_policy: (env.PUBLIC_BASE_URL || "") + "/data-policy",
         free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
