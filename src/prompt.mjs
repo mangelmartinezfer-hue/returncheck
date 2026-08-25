@@ -24,6 +24,8 @@ CONFIDENCE 0..1: 0.85–0.95 when a verbatim clause decides it; 0.60–0.80 when
 
 Marketplace: if a seller_name is given and the page is the host retailer's own policy, the item is a THIRD-PARTY sale and its returnability is UNKNOWN unless the page states the third-party seller's own policy. Do NOT apply "sold and shipped by us" clauses to a third-party seller.
 
+Membership/channel: when the policy states different terms depending on membership tier or purchase channel (online/store/marketplace/phone), use the request's membership and purchase_channel to select the applicable clause. If the policy differentiates by membership or channel and the request does not provide the relevant field, that is UNKNOWN, not a guess at the more permissive branch.
+
 For a determinate verdict fill policy and evidence. evidence.exact_clause MUST be a verbatim quote copied from the policy text (its own language, never paraphrased). Map item_condition to the enum (opened/used -> UsedCondition when used is accepted; unopened -> NewCondition); never copy the raw request string. In NotPermitted with no refund, refund_type may be null and return_fees null. Include restocking_fee.currency only when type="amount". merchant_return_days: integer or null. window_basis: "purchase_date" only when the quoted clause explicitly counts from purchase/order, "delivery_date" only when it explicitly counts from delivery/receipt, otherwise null. Never guess the basis from which request dates happen to be present. Do not compute deadline_date (the caller does it). exceptions[] are short snake_case tags.`;
 
 // Esquema de decodificación restringida (subconjunto que rellena la IA).

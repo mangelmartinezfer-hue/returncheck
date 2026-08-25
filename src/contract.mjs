@@ -4,6 +4,7 @@
 
 const ITEM_CONDITIONS = ["unopened", "opened", "used", "defective"];
 const REASONS = ["changed_mind", "defective", "wrong_size_or_model", "arrived_late", "other"];
+const PURCHASE_CHANNELS = ["online", "store", "phone", "marketplace"];
 
 // Devuelve { ok:true, value } o { ok:false, code, message }.
 export function validateRequest(body) {
@@ -11,7 +12,7 @@ export function validateRequest(body) {
     return { ok: false, code: "INVALID_INPUT", message: "Body must be a JSON object." };
 
   const { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name,
-          buyer_state, as_of, page_html, page_text } = body;
+          buyer_state, as_of, page_html, page_text, membership, purchase_channel } = body;
 
   if (typeof product_url !== "string" || !/^https?:\/\//i.test(product_url))
     return { ok: false, code: "INVALID_INPUT", message: "product_url is required and must be an http(s) URL." };
@@ -44,6 +45,16 @@ export function validateRequest(body) {
   if (seller_name !== undefined && typeof seller_name !== "string")
     return { ok: false, code: "INVALID_INPUT", message: "seller_name must be a string." };
 
+  // ADITIVO v1.1 (W03): señales de membresía/canal, para políticas que dan plazos
+  // distintos según el nivel de socio o dónde se compró. String libre para membership
+  // (cada comercio nombra sus niveles distinto: Plus, Prime, Elite...); enum cerrado
+  // para purchase_channel porque el motor sí necesita distinguir estos valores concretos.
+  if (membership !== undefined && typeof membership !== "string")
+    return { ok: false, code: "INVALID_INPUT", message: "membership must be a string." };
+
+  if (purchase_channel !== undefined && !PURCHASE_CHANNELS.includes(purchase_channel))
+    return { ok: false, code: "INVALID_INPUT", message: "purchase_channel must be one of " + PURCHASE_CHANNELS.join(", ") };
+
   // ADITIVO v1.0 (no rompe): el agente comprador puede pasarnos el contenido de la
   // página que YA tiene delante (su navegador sí renderiza JS y no está bloqueado).
   // Si viene, el motor VERIFICA sobre ese contenido en vez de leer la web.
@@ -53,7 +64,7 @@ export function validateRequest(body) {
   if (page_text !== undefined && (typeof page_text !== "string" || page_text.length > MAX_PAGE))
     return { ok: false, code: "INVALID_INPUT", message: "page_text must be a string under 4,000,000 chars." };
 
-  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name, buyer_state, as_of, page_html, page_text } };
+  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name, buyer_state, as_of, page_html, page_text, membership, purchase_channel } };
 }
 
 // Invariantes del contrato (sección 7). Defensa antes de responder: si el motor

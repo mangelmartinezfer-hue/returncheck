@@ -340,6 +340,31 @@ test("validateRequest rechaza buyer_state y as_of mal formados", () => {
   }).ok, false);
 });
 
+// ---------- W03: membership y purchase_channel llegan al motor (doc 33/44) ----------
+test("validateRequest conserva membership y purchase_channel (aditivos v1.1)", () => {
+  const r = validateRequest({
+    product_url: "https://clubmarket.test/products/air-purifier",
+    buyer_country: "US", membership: "Plus", purchase_channel: "online",
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.value.membership, "Plus");
+  assert.equal(r.value.purchase_channel, "online");
+});
+
+test("validateRequest rechaza purchase_channel fuera del enum", () => {
+  const r = validateRequest({
+    product_url: "https://x.test/p/1", buyer_country: "US", purchase_channel: "carrier_pigeon",
+  });
+  assert.equal(r.ok, false);
+});
+
+test("validateRequest acepta ausencia de membership/purchase_channel (no rompe v1.0)", () => {
+  const r = validateRequest({ product_url: "https://x.test/p/1", buyer_country: "US" });
+  assert.equal(r.ok, true);
+  assert.equal(r.value.membership, undefined);
+  assert.equal(r.value.purchase_channel, undefined);
+});
+
 // ---------- SEGURIDAD C09: jurisdicción/ley estatal ----------
 test("C09 detecta cláusula condicionada a jurisdicción", () => {
   assert.equal(clauseIsJurisdictionConditional(
