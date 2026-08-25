@@ -25,9 +25,33 @@ export function windowDaysFromClause(clause) {
 // La base debe estar explícita en la cita verificada o, para objetos internos sin
 // evidencia, declarada en policy.window_basis. Nunca se elige delivery_date solo
 // porque esté disponible: ese era el fallo que desplazaba RC25-05 cinco días.
+// W07 — La FINITUD de la ventana la manda el número de días, no la etiqueta del modelo.
+//
+// Por qué existe esto: la comprobación de vencimiento de más abajo solo dispara cuando
+// return_category === "FiniteReturnWindow". Si el modelo etiqueta mal una ventana finita
+// como "UnlimitedWindow" (visto en producción con plazos de 90 y 7 días), una ventana
+// YA CADUCADA no se convierte en NO y respondemos "sí, devolvible" a un comprador fuera
+// de plazo. No es un campo feo: es un SÍ falso, la peor clase de error de este producto.
+//
+// Demostrado: misma política de 90 días, compra 2026-04-01, hoy 2026-08-25 ->
+//   FiniteReturnWindow -> NO (correcto)   ·   UnlimitedWindow -> YES_WITH_CONDITIONS (falso)
+//
+// Regla determinista: si conocemos un plazo — declarado por el modelo o extraído de la
+// cita verificada — la ventana es finita. No se toca cuando el veredicto ya es NO.
+function reconcileFiniteCategory(resp, clause) {
+  if (!resp.policy || resp.verdict === "NO") return;
+  const days = resp.policy.merchant_return_days != null
+    ? resp.policy.merchant_return_days
+    : windowDaysFromClause(clause);
+  if (days != null) resp.policy.return_category = "FiniteReturnWindow";
+}
+
 export function applyDeadline(resp, req, today = todayDate()) {
   if (!resp.policy) return resp;
   const clause = resp.evidence && resp.evidence.exact_clause;
+  // Antes de cualquier salida temprana: la categoría es propiedad de la POLÍTICA, no de
+  // la petición. Debe corregirse aunque falten las fechas del comprador.
+  reconcileFiniteCategory(resp, clause);
   const inferredBasis = windowBasisFromClause(clause);
   const declaredBasis = ["purchase_date", "delivery_date"].includes(resp.policy.window_basis)
     ? resp.policy.window_basis : null;

@@ -341,6 +341,89 @@ test("validateRequest rechaza buyer_state y as_of mal formados", () => {
   }).ok, false);
 });
 
+// ---------- W07: return_category coherente con el plazo (doc 39) ----------
+// Fallo real visto en producción: ventanas finitas de 90 y 7 días salían como
+// "UnlimitedWindow". No es cosmético: la comprobación de vencimiento de applyDeadline
+// solo dispara con FiniteReturnWindow, así que la etiqueta mala convierte una ventana
+// caducada en un "sí, devolvible" falso.
+
+const FINITA_90 = () => ({
+  verdict: "YES_WITH_CONDITIONS", returnable: true,
+  policy: { return_category: "UnlimitedWindow", merchant_return_days: 90, window_basis: "purchase_date", deadline_date: null },
+  evidence: { exact_clause: "Members may return merchandise within 90 calendar days of purchase." },
+});
+
+test("W07 PELIGROSO: ventana finita mal etiquetada y CADUCADA debe volverse NO", () => {
+  // Compra 01-abr, hoy 25-ago: el plazo de 90 días venció el 30-jun.
+  const out = applyDeadline(FINITA_90(), { purchase_date: "2026-04-01" }, "2026-08-25");
+  assert.equal(out.policy.return_category, "FiniteReturnWindow");
+  assert.equal(out.policy.deadline_date, "2026-06-30");
+  assert.equal(out.verdict, "NO");          // antes del arreglo: YES_WITH_CONDITIONS
+  assert.equal(out.returnable, false);      // antes del arreglo: true
+});
+
+test("W07: ventana finita mal etiquetada pero DENTRO de plazo conserva el veredicto", () => {
+  const out = applyDeadline(FINITA_90(), { purchase_date: "2026-08-01" }, "2026-08-25");
+  assert.equal(out.policy.return_category, "FiniteReturnWindow");
+  assert.equal(out.policy.deadline_date, "2026-10-30");
+  assert.equal(out.verdict, "YES_WITH_CONDITIONS");
+  assert.equal(out.returnable, true);
+});
+
+test("W07: la categoría se corrige aunque falten las fechas del comprador", () => {
+  // Es propiedad de la POLÍTICA, no de la petición: no puede depender de que haya fechas.
+  const out = applyDeadline(FINITA_90(), {}, "2026-08-25");
+  assert.equal(out.policy.return_category, "FiniteReturnWindow");
+  assert.equal(out.policy.deadline_date, null);
+});
+
+test("W07: ventana ILIMITADA de verdad se respeta (no se inventa finitud)", () => {
+  const resp = {
+    verdict: "YES_WITH_CONDITIONS", returnable: true,
+    policy: { return_category: "UnlimitedWindow", merchant_return_days: null, window_basis: null, deadline_date: null },
+    evidence: { exact_clause: "You may return items at any time for a full refund." },
+  };
+  const out = applyDeadline(resp, { purchase_date: "2020-01-01" }, "2026-08-25");
+  assert.equal(out.policy.return_category, "UnlimitedWindow");
+  assert.equal(out.policy.deadline_date, null);
+  assert.equal(out.verdict, "YES_WITH_CONDITIONS");   // sin plazo no hay vencimiento
+});
+
+test("W07: ventana DESCONOCIDA no se convierte en finita ni en ilimitada", () => {
+  const resp = {
+    verdict: "YES_WITH_CONDITIONS", returnable: true,
+    policy: { return_category: "UnlimitedWindow", merchant_return_days: null, window_basis: null, deadline_date: null },
+    evidence: { exact_clause: "Eligible items may be returned in accordance with our policy." },
+  };
+  const out = applyDeadline(resp, { purchase_date: "2026-08-01" }, "2026-08-25");
+  assert.equal(out.policy.return_category, "UnlimitedWindow"); // sin dato, no inventamos
+  assert.equal(out.policy.deadline_date, null);
+});
+
+test("W07: el plazo extraído de la cita también fija la categoría", () => {
+  // El modelo no declaró días, pero la cita verificada sí los lleva.
+  const resp = {
+    verdict: "YES_WITH_CONDITIONS", returnable: true,
+    policy: { return_category: "UnlimitedWindow", merchant_return_days: null, window_basis: "purchase_date", deadline_date: null },
+    evidence: { exact_clause: "Outlet purchases may be returned within 7 calendar days of purchase." },
+  };
+  const out = applyDeadline(resp, { purchase_date: "2026-08-18" }, "2026-08-24");
+  assert.equal(out.policy.return_category, "FiniteReturnWindow");
+  assert.equal(out.policy.merchant_return_days, 7);
+  assert.equal(out.policy.deadline_date, "2026-08-25");
+});
+
+test("W07: un veredicto NO no se toca", () => {
+  const resp = {
+    verdict: "NO", returnable: false,
+    policy: { return_category: "NotPermitted", merchant_return_days: 30, window_basis: "purchase_date", deadline_date: null },
+    evidence: { exact_clause: "Final sale items cannot be returned." },
+  };
+  const out = applyDeadline(resp, { purchase_date: "2026-08-01" }, "2026-08-25");
+  assert.equal(out.policy.return_category, "NotPermitted");
+  assert.equal(out.verdict, "NO");
+});
+
 // ---------- W03: membership y purchase_channel llegan al motor (doc 33/44) ----------
 test("validateRequest conserva membership y purchase_channel (aditivos v1.1)", () => {
   const r = validateRequest({
