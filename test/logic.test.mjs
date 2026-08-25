@@ -7,7 +7,8 @@ import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
 import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
          policyKeywordHits, policyLinkCandidates, guessedPolicyUrls,
          clauseIsJurisdictionConditional, policyDefersToSeller,
-         clausePositiveButUnverifiedForOpenedItem } from "../src/text.mjs";
+         clausePositiveButUnverifiedForOpenedItem,
+         evidenceContext, splitSentences } from "../src/text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "../src/jsonld.mjs";
 import { assembleFromJsonLd } from "../src/engine.mjs";
 
@@ -363,6 +364,75 @@ test("validateRequest acepta ausencia de membership/purchase_channel (no rompe v
   assert.equal(r.ok, true);
   assert.equal(r.value.membership, undefined);
   assert.equal(r.value.purchase_channel, undefined);
+});
+
+// ---------- W04: la prueba puede estar en la frase, no en el recorte (doc 36) ----------
+// Los dos casos de abajo son REALES: se ejecutaron contra producción el 25-ago y
+// ambos degradaron a UNKNOWN con supports:false. El texto es el del holdout.
+
+const CLUBMARKET_TEXT =
+  "ClubMarket Plus members may return eligible standard merchandise within 90 calendar days of purchase. " +
+  "Customers without an active Plus membership have 30 calendar days from purchase.";
+
+const OUTLET_TEXT =
+  "Outlet purchases may be returned within 7 calendar days of purchase. " +
+  "They must be returned in person to a Factory Outlet location with the receipt and original packaging.";
+
+test("W04 RC25-12: cita recortada sin verbo de devolución se valida por su frase", () => {
+  const clause = "within 90 calendar days of purchase";
+  // Antes (sin policyText): la cita sola no menciona devoluciones -> rechazada.
+  assert.equal(clauseSupportsVerdict(clause, { verdict: "YES_WITH_CONDITIONS", days: 90 }), false);
+  // Ahora: la FRASE que la contiene sí dice "may return" -> aceptada.
+  assert.equal(clauseSupportsVerdict(clause, {
+    verdict: "YES_WITH_CONDITIONS", days: 90, policyText: CLUBMARKET_TEXT,
+  }), true);
+});
+
+test("W04 RC25-21: el nº de días puede estar en la frase contigua", () => {
+  const clause = "They must be returned in person to a Factory Outlet location with the receipt and original packaging.";
+  // Antes: la cita habla de devoluciones pero no contiene el 7 -> rechazada.
+  assert.equal(clauseSupportsVerdict(clause, { verdict: "YES_WITH_CONDITIONS", days: 7 }), false);
+  // Ahora: el "7 calendar days" está en la frase anterior de la MISMA página -> aceptada.
+  assert.equal(clauseSupportsVerdict(clause, {
+    verdict: "YES_WITH_CONDITIONS", days: 7, policyText: OUTLET_TEXT,
+  }), true);
+});
+
+test("W04 NO afloja el guard anti-ENVÍOS aunque haya devoluciones al lado", () => {
+  // Este es el riesgo que documenté al proponer W04: si ampliáramos el criterio de
+  // "habla de devoluciones" a las frases vecinas, volvería el fallo Allbirds/Olipop.
+  const page = "Free ground shipping on all orders over $50. Items may be returned within 30 days of delivery.";
+  assert.equal(clauseSupportsVerdict("Free ground shipping on all orders over $50.", {
+    verdict: "YES_WITH_CONDITIONS", days: 30, policyText: page,
+  }), false);
+});
+
+test("W04 no blanquea una cláusula negativa citando un fragmento inocuo", () => {
+  // Citar solo el trozo neutro de una frase negativa no puede sostener un positivo.
+  const page = "Final sale items cannot be returned within 30 days of purchase.";
+  assert.equal(clauseSupportsVerdict("within 30 days of purchase", {
+    verdict: "YES_WITH_CONDITIONS", days: 30, policyText: page,
+  }), false);
+});
+
+test("W04 no amplía el criterio del veredicto NO", () => {
+  // Una frase negativa VECINA no puede sostener un NO que la cita no afirma.
+  const page = "Items may be returned within 30 days. Final sale items cannot be returned.";
+  assert.equal(clauseSupportsVerdict("Items may be returned within 30 days.", {
+    verdict: "NO", policyText: page,
+  }), false);
+});
+
+test("W04 splitSentences separa por puntuación y por saltos de línea", () => {
+  assert.deepEqual(splitSentences("Uno. Dos! Tres?"), ["Uno.", "Dos!", "Tres?"]);
+  assert.deepEqual(splitSentences("Linea uno\nLinea dos"), ["Linea uno", "Linea dos"]);
+  assert.deepEqual(splitSentences(""), []);
+});
+
+test("W04 evidenceContext devuelve null si la cita no está en la página", () => {
+  assert.equal(evidenceContext("returns accepted within 365 days", CLUBMARKET_TEXT), null);
+  assert.equal(evidenceContext("", CLUBMARKET_TEXT), null);
+  assert.equal(evidenceContext("within 90 calendar days of purchase", ""), null);
 });
 
 // ---------- SEGURIDAD C09: jurisdicción/ley estatal ----------
