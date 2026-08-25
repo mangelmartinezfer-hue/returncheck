@@ -19,7 +19,7 @@ import { EVAL_CASES } from "./eval-cases.mjs";
 import { clauseInText } from "./text.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-24-w02-deadline-basis";
+const BUILD = "2026-08-25-w03-membership-channel";
 
 // Examen ciego v2: pasa el banco de casos por el motor de PRODUCCIÓN (vía agent_supplied)
 // y puntúa precisión, cobertura, trampas de honestidad y alucinaciones. Admin-gated.
@@ -148,7 +148,7 @@ function llmsTxt(env) {
 
 ## Input
 - product_url (required), buyer_country (required, ISO alpha-2)
-- optional: item_condition, reason, purchase_date, delivery_date, merchant, seller_name
+- optional: item_condition, reason, purchase_date, delivery_date, merchant, seller_name, buyer_state, as_of, membership, purchase_channel
 - optional: page_html or page_text — if you already have the product/policy page
   rendered, pass it and we verify against it (best coverage; bypasses sites that
   block server-side reads). We still never invent: no verifiable clause -> UNKNOWN.
@@ -211,7 +211,7 @@ function agentsJson(env) {
       description: "Can this specific product actually be returned for this buyer?",
       endpoint: "POST " + base + "/v1/check",
       required: ["product_url", "buyer_country"],
-      optional: ["item_condition", "reason", "purchase_date", "delivery_date", "merchant", "seller_name", "page_html", "page_text"],
+      optional: ["item_condition", "reason", "purchase_date", "delivery_date", "merchant", "seller_name", "buyer_state", "as_of", "membership", "purchase_channel", "page_html", "page_text"],
       returns: ["verdict", "returnable", "confidence", "policy", "evidence.exact_clause", "evidence.source_url"],
     }],
   };
@@ -252,6 +252,10 @@ function openapi(env) {
             delivery_date: { type: "string" },
             merchant: { type: "string" },
             seller_name: { type: "string" },
+            buyer_state: { type: "string", description: "2-letter uppercase subdivision code, e.g. CA. Needed to resolve state-conditional clauses (e.g. 'where prohibited by law') instead of falling back to UNKNOWN." },
+            as_of: { type: "string", description: "YYYY-MM-DD. The date to evaluate the return window against, if not today." },
+            membership: { type: "string", description: "Optional: the buyer's membership/loyalty tier with this merchant (e.g. 'Plus'), for policies with membership-conditional terms." },
+            purchase_channel: { type: "string", enum: ["online", "store", "phone", "marketplace"], description: "Optional: where the purchase was made, for policies with channel-conditional terms." },
             page_html: { type: "string", description: "Optional: raw HTML of the product/policy page you already have. If provided, ReturnCheck verifies against it instead of fetching (best coverage; bypasses anti-bot blocking). Max 4,000,000 chars." },
             page_text: { type: "string", description: "Optional: plain text of the page (alternative to page_html). Max 4,000,000 chars." },
           },
@@ -517,6 +521,8 @@ export default {
             purchase_date: url.searchParams.get("purchase_date") || undefined,
             delivery_date: url.searchParams.get("delivery_date") || undefined,
             seller_name: url.searchParams.get("seller") || undefined,
+            membership: url.searchParams.get("membership") || undefined,
+            purchase_channel: url.searchParams.get("purchase_channel") || undefined,
             page_text: url.searchParams.get("page_text") || undefined,
           });
           return json(r);

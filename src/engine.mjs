@@ -162,7 +162,7 @@ function coerceJson(out) {
 async function extract(env, policyText, req) {
   const userMsg =
     `PRODUCT_URL: ${req.product_url}\n` +
-    `REQUEST: ${JSON.stringify({ buyer_country: req.buyer_country, item_condition: req.item_condition || null, reason: req.reason || null })}\n` +
+    `REQUEST: ${JSON.stringify({ buyer_country: req.buyer_country, item_condition: req.item_condition || null, reason: req.reason || null, membership: req.membership || null, purchase_channel: req.purchase_channel || null })}\n` +
     `TODAY: ${todayDate()}\n` +
     `POLICY TEXT:\n${policyText}`;
   const messages = [
