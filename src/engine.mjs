@@ -223,6 +223,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
                      verdict: ai.verdict,
                      days: ai.policy.merchant_return_days,
                      category: ai.policy.return_category,
+                     policyText, // W04: verificar sobre la frase real, no sobre el recorte
                    });
   if (clauseOk) {
     resp.policy = {
@@ -257,6 +258,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
       in_text: !!(ai.evidence && clauseInText(ai.evidence.exact_clause, policyText)),
       supports: clauseSupportsVerdict((ai.evidence && ai.evidence.exact_clause) || "", {
         verdict: ai.verdict, days: ai.policy && ai.policy.merchant_return_days, category: ai.policy && ai.policy.return_category,
+        policyText, // W04: mismo criterio que el guard real, para que el diagnóstico no mienta
       }),
     } };
     resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";

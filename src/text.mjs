@@ -124,30 +124,105 @@ export function clauseInText(clause, text, minRun = 40) {
   return false;
 }
 
+// Normalización compartida (misma que clauseInText): minúsculas, sin comillas
+// tipográficas, espacios colapsados. Trabajar siempre en este espacio evita
+// desalineaciones de offsets entre la cita del modelo y el texto de la página.
+function normText(s) {
+  return (s || "").toLowerCase().replace(/["“”'’]/g, "").replace(/\s+/g, " ").trim();
+}
+
+// Parte un texto en frases (aproximación suficiente para prosa de políticas).
+export function splitSentences(text) {
+  if (!text) return [];
+  return text.split(/(?<=[.!?])\s+|\n+/).map((s) => s.trim()).filter(Boolean);
+}
+
+// W04 — Localiza en el TEXTO REAL de la página la frase que contiene la cita del
+// modelo, y una ventana de ±`neighbors` frases alrededor.
+//
+// Por qué existe: el modelo suele citar bien pero RECORTADO. En producción vimos
+// dos fallos reales de esta clase (docs 33/36):
+//   · RC25-12: citó "within 90 calendar days of purchase" — el trozo del plazo,
+//     sin el "ClubMarket Plus members may return..." que lo precede.
+//   · RC25-21: citó la frase del método de devolución; el "7 calendar days" estaba
+//     en la frase anterior.
+// En ambos la prueba SÍ estaba publicada en la página; simplemente no cabía en el
+// recorte. Ampliar la verificación al texto real que rodea la cita no inventa nada:
+// sigue siendo texto del comercio, y `clauseInText` ya ha probado que la cita existe.
+//
+// Devuelve { sentence, window } en texto normalizado, o null si no se localiza.
+export function evidenceContext(clause, policyText, neighbors = 1) {
+  const c = normText(clause);
+  if (c.length < 12 || !policyText) return null;
+  const sentences = splitSentences(normText(policyText));
+  if (!sentences.length) return null;
+
+  // 1) Caso ideal: alguna frase contiene la cita entera.
+  let idx = sentences.findIndex((s) => s.includes(c));
+
+  // 2) Si el modelo parafraseó los bordes, anclamos por tramo literal largo
+  //    (mismo criterio que clauseInText, para no ser más laxos que él).
+  if (idx < 0) {
+    const RUN = 40;
+    outer:
+    for (let i = 0; i < sentences.length; i++) {
+      for (let j = 0; j + RUN <= c.length; j += 10) {
+        if (sentences[i].includes(c.slice(j, j + RUN))) { idx = i; break outer; }
+      }
+    }
+  }
+  if (idx < 0) return null;
+
+  const from = Math.max(0, idx - neighbors);
+  const to = Math.min(sentences.length - 1, idx + neighbors);
+  return { sentence: sentences[idx], window: sentences.slice(from, to + 1).join(" ") };
+}
+
+const NEGATIVE_RE = /(final sale|sales? (are )?final|all sales final|non-?returnable|not returnable|cannot be returned|can'?t be returned|no returns?|not eligible|no refund|ineligible|venta final|no se admite|no reembolsable|no se puede devolver)/;
+const RETURNS_RE = /\b(return|returns|returned|returnable|refund|refunds|refunded|exchange|exchanges|exchanged|replace|replacement|replaced|store credit|store-credit)\b/;
+const RETURNS_ES_RE = /devoluc|reembols|cambio|garant/;
+
 // ¿La cita SOSTIENE de verdad el veredicto? (no basta con que exista en la página)
 // Arregla el fallo de citar frases de ENVÍOS ("Free shipping...") o afirmar días
 // que la cita no respalda. Reglas:
-//  - La cita debe hablar de DEVOLUCIONES (no solo de envíos).
-//  - Si hay días, el número debe aparecer en la cita.
-//  - Si el veredicto es NO / NotPermitted, la cita debe contener una frase negativa.
-export function clauseSupportsVerdict(clause, { verdict, days, category } = {}) {
+//  - La FRASE de la que sale la cita debe hablar de DEVOLUCIONES (no solo de envíos).
+//  - Si hay días, el número debe aparecer en esa frase o en una contigua.
+//  - Si el veredicto es NO / NotPermitted, la CITA debe contener una frase negativa.
+//
+// `policyText` es opcional. Sin él, el comportamiento es exactamente el anterior
+// (se juzga la cita a secas), así que ningún llamador antiguo cambia de conducta.
+export function clauseSupportsVerdict(clause, { verdict, days, category, policyText } = {}) {
   if (!clause) return false;
-  const c = clause.toLowerCase();
-  const neg = /(final sale|sales? (are )?final|all sales final|non-?returnable|not returnable|cannot be returned|can'?t be returned|no returns?|not eligible|no refund|ineligible|venta final|no se admite|no reembolsable|no se puede devolver)/.test(c);
+  const c = normText(clause);
+
   // La decisión la manda el VEREDICTO, no la categoría (que el modelo rellena mal a veces).
-  // Para un veredicto NO, basta (y hace falta) una frase negativa clara.
-  if (verdict === "NO") return neg;
+  // Para un veredicto NO, basta (y hace falta) una frase negativa clara EN LA CITA.
+  // Deliberadamente NO se amplía aquí: ampliar podría dejar que una frase negativa
+  // vecina sostenga un "no devolvible" que la cita real no afirma.
+  if (verdict === "NO") return NEGATIVE_RE.test(c);
+
+  // W04: para veredictos positivos juzgamos sobre la frase real de la página.
+  const ctx = evidenceContext(clause, policyText);
+  const sentence = ctx ? ctx.sentence : c;   // frase que contiene la cita
+  const window = ctx ? ctx.window : c;       // esa frase ± 1 contigua
+
   // SEGURIDAD: un veredicto POSITIVO nunca puede apoyarse en una cláusula NEGATIVA
   // ("cannot be returned", "final sale"). Cierra el hueco que dejaba pasar un YES
   // citando "Final sale items cannot be returned".
-  if (neg) return false;
-  // Para un veredicto positivo, la cita debe hablar de DEVOLUCIONES (no de envíos)...
-  const mentionsReturns =
-    /\b(return|returns|returned|returnable|refund|refunds|refunded|exchange|exchanges|exchanged|replace|replacement|replaced|store credit|store-credit)\b/.test(c) ||
-    /devoluc|reembols|cambio|garant/.test(c);
-  if (!mentionsReturns) return false; // p.ej. "Free ground shipping..." -> no vale
-  // ...y si hay un nº de días, ese número debe aparecer en la cita.
-  if (days != null && !new RegExp("\\b" + days + "\\b").test(c)) return false;
+  // Se evalúa sobre la FRASE, no sobre el recorte: si el modelo cita un fragmento
+  // inocuo de una frase negativa, el fragmento no debe blanquearla.
+  if (NEGATIVE_RE.test(sentence)) return false;
+
+  // La frase debe hablar de DEVOLUCIONES (no de envíos). Este es el guard
+  // anti-Allbirds/Olipop y se mantiene ceñido a la frase citada: NO se amplía a
+  // las vecinas, porque entonces citar "Free ground shipping..." junto a una frase
+  // de devoluciones volvería a colar.
+  if (!RETURNS_RE.test(sentence) && !RETURNS_ES_RE.test(sentence)) return false;
+
+  // El nº de días sí puede estar en una frase contigua: las políticas reales
+  // separan a menudo el plazo ("...within 7 calendar days of purchase.") de sus
+  // condiciones ("They must be returned in person...").
+  if (days != null && !new RegExp("\\b" + days + "\\b").test(window)) return false;
   return true;
 }
 
