@@ -19,7 +19,7 @@ import { EVAL_CASES } from "./eval-cases.mjs";
 import { clauseInText } from "./text.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-25-w04-evidence-sentence-scope";
+const BUILD = "2026-08-25-data-policy-notice";
 
 // Examen ciego v2: pasa el banco de casos por el motor de PRODUCCIÓN (vía agent_supplied)
 // y puntúa precisión, cobertura, trampas de honestidad y alucinaciones. Admin-gated.
@@ -127,6 +127,73 @@ function educated402(env, note) {
   }, { status: 402 });
 }
 
+// ---------------------------------------------------------------------------
+// Aviso de datos y fuentes.
+//
+// Va PRIMERO, antes de que exista una sola línea de código de captura: decisión
+// de Miguel del 25 ago 2026 (doc 40). Guardar avisando y guardar sin avisar son
+// dos situaciones distintas, y lo capturado antes del aviso se captura sin él.
+//
+// Cada frase de este texto describe lo que el código HACE, no lo que queremos
+// que haga. Si algo de aquí deja de ser cierto, se cambia el aviso el mismo día.
+// Deliberadamente NO contiene la promesa "no vendemos estos datos": el corpus es
+// un activo y atarse a eso hoy sería prometer lo que quizá no se cumpla.
+// ---------------------------------------------------------------------------
+function dataPolicyText(env) {
+  const base = env.PUBLIC_BASE_URL || "";
+  const contact = env.CONTACT_EMAIL || "";
+  const months = Number(env.DATA_RETENTION_MONTHS || "48");
+  return `# ReturnCheck — Data & Sources Notice
+
+Last updated: 2026-08-25
+
+ReturnCheck reads return-policy text and answers whether a specific product can
+actually be returned. This notice says what we keep, why, and how to get it removed.
+
+## What we store
+
+- The return-policy text we read, or that a client sends us as page_text /
+  page_html, kept as received.
+- Where it came from: the source URL when there is one, how it reached us
+  (fetched by us / supplied by a client / supplied by a calling agent), and the
+  date we captured it.
+- A one-way reference to the API client whose request triggered the capture.
+  That reference is a hash. Never the API key itself. Never an email address.
+
+## What we do not store
+
+- Buyer personal data. Requests should not contain it. Text that appears to
+  contain personal information is flagged, withheld from use, and reviewed by a
+  person or deleted.
+- Payment details, credentials, or client secrets.
+
+## Why we store it
+
+To verify our own answers, correct our errors, and improve coverage. Stored text
+is never used to answer another user's query unless a person has reviewed it first.
+
+## Merchants — removal
+
+If this text is from your site and you want it removed, email ${contact} with your
+domain. We delete it. If you also want us to stop storing your site's policy text
+going forward, say so in the same email and we will.
+
+## Retention
+
+${months} months by default, or until deletion is requested — whichever comes first.
+
+## Contact
+
+${contact}
+${base ? "\n" + base + "/data-policy\n" : ""}`;
+}
+
+function dataPolicy(env) {
+  return new Response(dataPolicyText(env), {
+    headers: { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*" },
+  });
+}
+
 // Manifiesto en texto para agentes/LLMs que rastrean el dominio.
 function llmsTxt(env) {
   const base = env.PUBLIC_BASE_URL || "";
@@ -169,6 +236,9 @@ Response: {"verdict":"YES_WITH_CONDITIONS","returnable":true,"confidence":0.9,
 - MCP manifest (tool list): ${base}/mcp
 - OpenAPI: ${base}/openapi.json  ·  Plugin manifest: ${base}/.well-known/ai-plugin.json
 - Agents manifest: ${base}/agents.json
+
+## Data & sources
+- What we store, why, and how merchants get it removed: ${base}/data-policy
 `;
   return new Response(body, { headers: { "content-type": "text/plain; charset=utf-8", "access-control-allow-origin": "*" } });
 }
@@ -187,8 +257,8 @@ function aiPluginJson(env) {
     auth: { type: "none" },
     api: { type: "openapi", url: base + "/openapi.json" },
     logo_url: base + "/favicon.ico",
-    contact_email: "hello@returncheck.dev",
-    legal_info_url: base + "/",
+    contact_email: env.CONTACT_EMAIL || "",
+    legal_info_url: base + "/data-policy",
     pricing: { model: "per_call", amount_usd: price, unknown_is_free: true, free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true" },
   };
   return json(manifest, { headers: { "access-control-allow-origin": "*" } });
@@ -204,6 +274,8 @@ function agentsJson(env) {
     description: "Verified return-policy answers for AI shopping agents. Never invents: returns UNKNOWN instead of guessing.",
     url: base,
     openapi: base + "/openapi.json",
+    data_policy: base + "/data-policy",
+    contact_email: env.CONTACT_EMAIL || "",
     mcp: { transport: "streamable_http", url: base + "/mcp", tools: ["check_return"] },
     pricing: { unit: "per_verified_answer", amount_usd: price, currency: "USD", unknown_is_free: true, payment: ["x402", "prepaid_api_key"] },
     flows: [{
@@ -338,6 +410,7 @@ async function handleSignup(request, env) {
     free_credit_usd: freeCredit,
     price_usd_per_call: Number(env.PRICE_USD || "0.02"),
     note: "Send this key as 'Authorization: Bearer <key>' to /v1/check. UNKNOWN answers are free.",
+    data_policy: (env.PUBLIC_BASE_URL || "") + "/data-policy",
   });
 }
 
@@ -499,6 +572,7 @@ export default {
       if (p === "/mcp") return await handleMcp(request, env);
       // Manifiestos de descubrimiento para agentes/crawlers.
       if (request.method === "GET" && p === "/llms.txt") return llmsTxt(env);
+      if (request.method === "GET" && p === "/data-policy") return dataPolicy(env);
       if (request.method === "GET" && (p === "/openapi.json" || p === "/.well-known/openapi.json")) return openapi(env);
       if (request.method === "GET" && (p === "/.well-known/ai-plugin.json" || p === "/ai-plugin.json")) return aiPluginJson(env);
       if (request.method === "GET" && (p === "/agents.json" || p === "/.well-known/agents.json")) return agentsJson(env);
@@ -542,6 +616,7 @@ export default {
         build: BUILD,      // marcador de versión para verificar el deploy
         model: env.AI_MODEL || "default-8b-fast",
         mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
+        data_policy: (env.PUBLIC_BASE_URL || "") + "/data-policy",
         free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
         browser_fallback: String(env.USE_BROWSER || "false") === "true",
         question: "Can this specific product actually be returned?",

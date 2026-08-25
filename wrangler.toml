@@ -10,6 +10,9 @@ CHARGE_ON_UNKNOWN = "false" # decisión 22 ago: NO se cobra en UNKNOWN
 SIGNUP_FREE_CREDIT_USD = "2.00"  # crédito de prueba al registrarse (~100 consultas)
 CACHE_TTL_DAYS = "7"        # frescura del extracto de política cacheado
 PUBLIC_BASE_URL = "https://returncheck.m-angelmartinez-fer.workers.dev"
+# --- Aviso de datos y fuentes (/data-policy). Publicos, no son secretos. ---
+CONTACT_EMAIL = "martiplacsystem@gmail.com"   # direccion de reclamacion/borrado
+DATA_RETENTION_MONTHS = "48"                  # decision 25 ago 2026 (doc 40)
 # --- Tramo de prueba SIN clave (para que agentes autónomos prueben check_return) ---
 FREE_TRIAL_ENABLED = "true"     # pon "false" para cerrar el tramo gratis
 FREE_IP_DAILY = "3"             # consultas gratis por IP y día
