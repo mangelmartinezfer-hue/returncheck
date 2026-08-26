@@ -22,7 +22,7 @@ import { corpusStats, deleteMerchantCorpus } from "./corpus.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w14-captura-corpus";
+const BUILD = "2026-08-26-w15-corpus-limpio";
 
 // W09 — Autorizacion de administrador.
 //
@@ -69,6 +69,12 @@ async function handleEval(request, env, url) {
       purchase_date: c.request.purchase_date,
       delivery_date: c.request.delivery_date,
       seller_name: c.request.seller_name,
+      // W15 — el banco de pruebas NO entra en el corpus. El corpus es el material
+      // con el que se responde y del que saldran los avisos de cambio de politica;
+      // llenarlo de casos sinteticos que escribimos nosotros lo contamina justo en
+      // la parte que lo hace valioso. Una pasada de /eval son 18 o 25 documentos
+      // falsos, y llevamos muchas.
+      __no_corpus: true,
       // W06 — el holdout usa campos que el banco propio no tenia. Se pasan solo
       // si el caso los trae, asi que el banco de 18 se comporta exactamente igual.
       as_of: c.request.as_of,
