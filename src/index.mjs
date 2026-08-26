@@ -16,11 +16,12 @@ import { freeTrial } from "./freetier.mjs";
 import { readMetrics } from "./metrics.mjs";
 import { json, errorResponse, todayDate } from "./util.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
+import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w12-condicion-excluida";
+const BUILD = "2026-08-26-w06-holdout-25";
 
 // W09 — Autorizacion de administrador.
 //
@@ -48,9 +49,14 @@ function adminOk(request, url, env) {
 async function handleEval(request, env, url) {
   if (!adminOk(request, url, env))
     return errorResponse("INVALID_INPUT", "Not found.", 404);
+  // W06 — ?set=holdout corre el banco de 25 que NO escribimos nosotros. Por
+  // defecto sigue siendo el de 18, para no romper ninguna comparacion anterior.
+  const setName = url.searchParams.get("set") === "holdout" ? "holdout" : "own";
+  const BANCO = setName === "holdout" ? HOLDOUT_CASES : EVAL_CASES;
   const from = Math.max(0, parseInt(url.searchParams.get("from") || "0", 10) || 0);
-  const count = parseInt(url.searchParams.get("count") || String(EVAL_CASES.length), 10) || EVAL_CASES.length;
-  const slice = EVAL_CASES.slice(from, from + count);
+  const countRaw = url.searchParams.get("count");
+  const count = countRaw === null ? BANCO.length : (parseInt(countRaw, 10) || 0);
+  const slice = BANCO.slice(from, from + count);
 
   const results = [];
   for (const c of slice) {
@@ -62,14 +68,22 @@ async function handleEval(request, env, url) {
       purchase_date: c.request.purchase_date,
       delivery_date: c.request.delivery_date,
       seller_name: c.request.seller_name,
+      // W06 — el holdout usa campos que el banco propio no tenia. Se pasan solo
+      // si el caso los trae, asi que el banco de 18 se comporta exactamente igual.
+      as_of: c.request.as_of,
+      purchase_channel: c.request.purchase_channel,
+      membership: c.request.membership,
       page_text: c.page_text,
     };
     let got = "ERROR", policyDays = null, clause = null, hallucination = false, err = null;
     let via = null, degrade = null, fromCandidate = null, guard = null, reason = null;
+    let gotBasis = null, gotDeadline = null;
     try {
       const resp = await runCheck(env, req);
       got = resp.verdict;
       policyDays = resp.policy ? (resp.policy.merchant_return_days ?? null) : null;
+      gotBasis = resp.policy ? (resp.policy.window_basis ?? null) : null;
+      gotDeadline = resp.policy ? (resp.policy.deadline_date ?? null) : null;
       clause = resp.evidence ? resp.evidence.exact_clause : null;
       via = resp.meta ? resp.meta.checked_via : null;
       degrade = resp.meta && resp.meta.degrade ? resp.meta.degrade : null; // por qué se degradó a UNKNOWN
@@ -88,11 +102,26 @@ async function handleEval(request, env, url) {
     const correct = got === expected;
     const determinate = got !== "UNKNOWN" && got !== "ERROR";
     const daysOk = c.expected.days == null ? null : (policyDays === c.expected.days);
+    const basisOk = c.expected.window_basis == null ? null : (gotBasis === c.expected.window_basis);
+    const deadlineOk = c.expected.deadline == null ? null : (gotDeadline === c.expected.deadline);
     let errorType = "ok";
     if (!correct) errorType = (got === "UNKNOWN") ? "safe_miss" : "UNSAFE";
+    // W06 — puntuacion OPERATIVA: agrupa YES y YES_WITH_CONDITIONS como una sola
+    // decision de elegibilidad. Existe porque el motor no emite nunca YES pelado,
+    // y sin esta vista una diferencia de ETIQUETA se contaria como error
+    // PELIGROSO — que es decir que el motor miente cuando en realidad acierta la
+    // decision. Las dos vistas se informan; ninguna sustituye a la otra.
+    const pos = (v) => (v === "YES" || v === "YES_WITH_CONDITIONS") ? "POSITIVE" : v;
+    const correctOp = pos(got) === pos(expected);
+    let errorTypeOp = "ok";
+    if (!correctOp) errorTypeOp = (got === "UNKNOWN") ? "safe_miss" : "UNSAFE";
+    const taxonomyOnly = !correct && correctOp;
     results.push({
       id: c.id, trap: !!c.trap, expected, got, correct, determinate,
       expected_days: c.expected.days ?? null, got_days: policyDays, daysOk,
+      expected_basis: c.expected.window_basis ?? null, got_basis: gotBasis, basisOk,
+      expected_deadline: c.expected.deadline ?? null, got_deadline: gotDeadline, deadlineOk,
+      correct_op: correctOp, errorType_op: errorTypeOp, taxonomy_only: taxonomyOnly,
       cited_clause: clause,
       clause_from_candidate: fromCandidate,
       // W11 — antes esto decía "model returned UNKNOWN" siempre que no hubiera
@@ -119,6 +148,22 @@ async function handleEval(request, env, url) {
   const halluc = results.filter(r => r.hallucination).length;
   const safeMiss = results.filter(r => r.errorType === "safe_miss").length;
   const unsafe = results.filter(r => r.errorType === "UNSAFE").length;
+  const correctOpN = results.filter(r => r.correct_op).length;
+  const detCorrectOp = results.filter(r => r.determinate && r.correct_op).length;
+  const unsafeOp = results.filter(r => r.errorType_op === "UNSAFE").length;
+  const safeMissOp = results.filter(r => r.errorType_op === "safe_miss").length;
+  const taxOnly = results.filter(r => r.taxonomy_only).length;
+  const conDeadline = results.filter(r => r.deadlineOk !== null);
+  const deadlineOkN = conDeadline.filter(r => r.deadlineOk).length;
+  const conBasis = results.filter(r => r.basisOk !== null);
+  const basisOkN = conBasis.filter(r => r.basisOk).length;
+  // El techo de cobertura de un banco con trampas NO es 100: los casos cuyo
+  // resultado correcto es UNKNOWN nunca pueden contar como cobertura. Publicarlo
+  // evita perseguir un numero imposible, que es justo lo que paso el 26 de agosto
+  // con el banco propio (techo 72,2 %) leido como si fuera un suspenso.
+  // Se calcula sobre el BANCO ENTERO, no sobre la tanda: el techo es una propiedad
+  // del instrumento, no de cuantos casos se hayan corrido esta vez.
+  const techo = BANCO.filter(c => c.expected.verdict !== "UNKNOWN").length;
   // W11 — reparto de las abstenciones. Un banco con 6 UNKNOWN no dice lo mismo si
   // los pone el modelo (falta capacidad) que si los pone un guard (falta cita), y
   // hasta ahora el resumen no permitía distinguirlo de un vistazo.
@@ -138,7 +183,9 @@ async function handleEval(request, env, url) {
     date: todayDate(),
     model: env.AI_MODEL || "default-8b-fast",
     scope: "production engine via agent_supplied (page_text); verdicts vs hand-verified expected. Cases authored and run by the ReturnCheck team (not third-party).",
+    set: setName,
     cases: n,
+    coverage_ceiling_pct: pct(techo, BANCO.length),  // maximo alcanzable del banco: los UNKNOWN esperados nunca cuentan como cobertura
     accuracy_pct: pct(correct, n),                 // % veredicto correcto sobre el total
     coverage_pct: pct(det, n),                     // % con veredicto determinado (no UNKNOWN)
     precision_determinate_pct: pct(detCorrect, det), // de los determinados, % correctos
@@ -153,6 +200,18 @@ async function handleEval(request, env, url) {
     clauses_rescued_by_candidate: rescued,
     clauses_cited: cited,
     unknown_breakdown: guards,               // W11: quién abstuvo — cada guard por su nombre, y el modelo por el suyo
+    // W06 — la MISMA tanda puntuada de las dos maneras. Estricta arriba, operativa aquí.
+    operational: {
+      accuracy_pct: pct(correctOpN, n),
+      precision_determinate_pct: pct(detCorrectOp, det),
+      unsafe_errors: unsafeOp,
+      safe_misses: safeMissOp,
+      taxonomy_only_diffs: taxOnly,          // aciertan la decisión, fallan la etiqueta YES vs YES_WITH_CONDITIONS
+    },
+    window_accuracy: {
+      deadline_ok: deadlineOkN, deadline_total: conDeadline.length,
+      basis_ok: basisOkN, basis_total: conBasis.length,
+    },
     results,
   }, { headers: { "access-control-allow-origin": "*" } });
 }
