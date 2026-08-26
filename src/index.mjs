@@ -20,12 +20,33 @@ import { clauseInText } from "./text.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w08-answer-human";
+const BUILD = "2026-08-26-w09-admin-header";
+
+// W09 — Autorizacion de administrador.
+//
+// Hasta hoy la clave viajaba SOLO como parametro de la URL (?k=...). Las URLs se
+// escriben enteras en los registros de Cloudflare, asi que cada visita a /eval o
+// /stats dejaba la clave de administracion en texto plano en los logs. Lo detecto
+// la sesion local al ver que medir las dos ramas la escribiria dos veces.
+//
+// Es incoherente con lo que publicamos en /data-policy sobre no guardar secretos,
+// y es del tipo de hallazgo que le marcariamos a un cliente en una auditoria.
+//
+// Ahora se acepta la cabecera Authorization: Bearer <clave>, que NO va al log.
+// Se conserva ?k= porque el panel /dashboard se abre pegando la URL en el
+// navegador y romperlo hoy no arregla nada. Queda dicho en el README lo que falta:
+// el panel sigue dejando rastro, y cerrarlo del todo pide sesion con cookie.
+function adminOk(request, url, env) {
+  if (!env.ADMIN_KEY) return false;
+  const header = bearer(request);
+  if (header && header === env.ADMIN_KEY) return true;
+  return url.searchParams.get("k") === env.ADMIN_KEY;
+}
 
 // Examen ciego v2: pasa el banco de casos por el motor de PRODUCCIÓN (vía agent_supplied)
 // y puntúa precisión, cobertura, trampas de honestidad y alucinaciones. Admin-gated.
 async function handleEval(request, env, url) {
-  if (!env.ADMIN_KEY || url.searchParams.get("k") !== env.ADMIN_KEY)
+  if (!adminOk(request, url, env))
     return errorResponse("INVALID_INPUT", "Not found.", 404);
   const from = Math.max(0, parseInt(url.searchParams.get("from") || "0", 10) || 0);
   const count = parseInt(url.searchParams.get("count") || String(EVAL_CASES.length), 10) || EVAL_CASES.length;
@@ -341,7 +362,7 @@ function openapi(env) {
 
 // ---- Panel de control: métricas reales del proyecto ----
 async function handleStats(request, env, url) {
-  if (!env.ADMIN_KEY || url.searchParams.get("k") !== env.ADMIN_KEY)
+  if (!adminOk(request, url, env))
     return errorResponse("INVALID_INPUT", "Not found.", 404);
 
   const price = Number(env.PRICE_USD || "0.02");

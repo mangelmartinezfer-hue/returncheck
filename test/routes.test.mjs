@@ -86,3 +86,51 @@ test("no regresión: /dashboard sigue oculto sin clave de administrador", async 
 test("no regresión: una ruta inexistente sigue devolviendo 404", async () => {
   assert.equal((await get("/no-existe")).status, 404);
 });
+
+// ---------- W09: la clave de administrador deja de tener que ir en la URL ----------
+// Lo detecto la sesion local: las URLs se escriben enteras en los registros de
+// Cloudflare, asi que cada visita a /eval o /stats dejaba la clave en texto plano
+// en los logs. Medir las dos ramas del experimento la habria escrito dos veces.
+// Incoherente con lo que publicamos en /data-policy sobre no guardar secretos.
+
+const DB_FALSA = {
+  prepare: () => ({
+    bind: () => ({ first: async () => ({}), all: async () => ({ results: [] }), run: async () => ({}) }),
+    first: async () => ({}), all: async () => ({ results: [] }), run: async () => ({}),
+  }),
+};
+const ENV_ADMIN = { ...ENV, ADMIN_KEY: "clave-de-prueba-no-real", DB: DB_FALSA };
+
+const pide = (path, headers = {}) =>
+  worker.fetch(new Request("https://rc.example" + path, { headers }), ENV_ADMIN);
+
+test("W09: /stats acepta la clave por cabecera, sin escribirla en la URL", async () => {
+  const r = await pide("/stats", { authorization: "Bearer clave-de-prueba-no-real" });
+  assert.equal(r.status, 200);
+});
+
+test("W09: /eval acepta la clave por cabecera", async () => {
+  const r = await pide("/eval?count=0", { authorization: "Bearer clave-de-prueba-no-real" });
+  assert.equal(r.status, 200);
+});
+
+test("W09: se conserva ?k= — el panel se abre pegando la URL y romperlo hoy no arregla nada", async () => {
+  assert.equal((await pide("/stats?k=clave-de-prueba-no-real")).status, 200);
+  assert.equal((await pide("/dashboard?k=clave-de-prueba-no-real")).status, 200);
+});
+
+test("W09: sin clave sigue siendo 404, y una clave falsa también", async () => {
+  assert.equal((await pide("/stats")).status, 404);
+  assert.equal((await pide("/stats", { authorization: "Bearer otra-cosa" })).status, 404);
+  assert.equal((await pide("/stats?k=otra-cosa")).status, 404);
+  assert.equal((await pide("/eval")).status, 404);
+});
+
+test("W09: sin ADMIN_KEY configurada no se abre por ninguna de las dos vías", async () => {
+  // Un despliegue sin la variable no puede quedar con el panel abierto de par en par.
+  const sinClave = { ...ENV, DB: DB_FALSA };
+  const r1 = await worker.fetch(new Request("https://rc.example/stats", { headers: { authorization: "Bearer x" } }), sinClave);
+  const r2 = await worker.fetch(new Request("https://rc.example/stats?k="), sinClave);
+  assert.equal(r1.status, 404);
+  assert.equal(r2.status, 404);
+});
