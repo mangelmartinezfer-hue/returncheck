@@ -592,6 +592,11 @@ export async function runCheck(env, req) {
     country: resp.merchant_resolved && resp.merchant_resolved.country,
     apiKey: req.__api_key,
     scope: { seller: req.seller_name || null, channel: req.purchase_channel || null, membership: req.membership || null },
+    // W16 — lo que acabamos de extraer viaja con la captura: es lo que permite
+    // decir EN QUE cambio una politica, no solo QUE cambio.
+    parsed: resp.policy
+      ? { days: resp.policy.merchant_return_days ?? null, category: resp.policy.return_category || null }
+      : null,
   });
   if (corpusId) {
     resp.meta = { ...resp.meta, corpus_id: corpusId };

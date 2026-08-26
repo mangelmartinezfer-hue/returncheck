@@ -18,11 +18,12 @@ import { json, errorResponse, todayDate } from "./util.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
-import { corpusStats, deleteMerchantCorpus } from "./corpus.mjs";
+import { corpusStats, deleteMerchantCorpus, sha256full } from "./corpus.mjs";
+import { addWatch, removeWatch, listWatches, changesFor } from "./watch.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w15-corpus-limpio";
+const BUILD = "2026-08-27-w15-w16-avisos";
 
 // W09 — Autorizacion de administrador.
 //
@@ -397,6 +398,13 @@ function agentsJson(env) {
     url: base,
     openapi: base + "/openapi.json",
     data_policy: base + "/data-policy",
+    // W16 — si no se anuncia, no se descubre; y si no se descubre, no existe.
+    change_alerts: {
+      watch: base + "/v1/watch",
+      watchlist: base + "/v1/watchlist",
+      changes: base + "/v1/changes",
+      note: "Register the merchant domains you care about; poll /v1/changes for policy changes since your last check.",
+    },
     contact_email: env.CONTACT_EMAIL || "",
     mcp: { transport: "streamable_http", url: base + "/mcp", tools: ["check_return"] },
     pricing: { unit: "per_verified_answer", amount_usd: price, currency: "USD", unknown_is_free: true, payment: ["x402", "prepaid_api_key"] },
@@ -700,6 +708,41 @@ export default {
       if (request.method === "GET" && (p === "/agents.json" || p === "/.well-known/agents.json")) return agentsJson(env);
       // Panel de control (protegido con clave de administrador).
       if (request.method === "GET" && p === "/stats") return await handleStats(request, env, url);
+      // W16 — AVISOS DE CAMBIO DE POLITICA. Se PIDEN, no se empujan: un agente es
+      // un programa que pregunta, no un buzon que recibe. Sin webhooks no hay
+      // entregas perdidas ni reintentos. Requiere clave: es para clientes, y el
+      // cliente se identifica por el hash de su clave, nunca por su correo.
+      if (p === "/v1/watch" || p === "/v1/watchlist" || p === "/v1/changes") {
+        const k = bearer(request);
+        if (!k) return errorResponse("INVALID_INPUT", "An API key is required for change alerts.", 401);
+        const cliente = await getClient(env, k);
+        if (!cliente) return errorResponse("INVALID_INPUT", "Unknown API key.", 401);
+        const ref = await sha256full(k);   // el MISMO hash que usa el corpus
+
+        if (request.method === "POST" && p === "/v1/watch") {
+          const b = await request.json().catch(() => ({}));
+          const r = await addWatch(env, ref, b && b.domain);
+          if (!r.ok) return errorResponse("INVALID_INPUT", r.error, 400);
+          return json(r);
+        }
+        if (request.method === "DELETE" && p === "/v1/watch") {
+          const b = await request.json().catch(() => ({}));
+          const r = await removeWatch(env, ref, b && b.domain);
+          if (!r.ok) return errorResponse("INVALID_INPUT", r.error, 400);
+          return json(r);
+        }
+        if (request.method === "GET" && p === "/v1/watchlist") {
+          return json({ watching: await listWatches(env, ref) });
+        }
+        if (request.method === "GET" && p === "/v1/changes") {
+          return json(await changesFor(env, ref, {
+            since: url.searchParams.get("since"),
+            limit: url.searchParams.get("limit"),
+          }));
+        }
+        return errorResponse("INVALID_INPUT", "Method not allowed for this path.", 405);
+      }
+
       if (request.method === "GET" && p === "/eval") return await handleEval(request, env, url);
 
       // W14 — Administracion del corpus. La via de borrado por comercio existe

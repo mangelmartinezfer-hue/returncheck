@@ -43,6 +43,7 @@ test("PII: una política normal, sin datos personales, no se marca", () => {
 function dbFalsa() {
   const filas = [];
   const usos = [];
+  const cambios = [];
   const run = (sql, args) => {
     const s = sql.replace(/\s+/g, " ").trim();
     if (s.startsWith("INSERT INTO policy_corpus (")) {
@@ -50,13 +51,15 @@ function dbFalsa() {
              authorized_by, content, content_hash, content_chars, captured_at, effective_at,
              scope_general, scope_category, scope_product, scope_seller, scope_channel,
              scope_membership, review_state, pii_suspected, supersedes_id, client_ref,
-             retention_until, deleted_at] = args;
+             retention_until, deleted_at, parsed_days, parsed_category] = args;
       filas.push({ id, merchant_domain, merchant_name, country, source_url, source_kind, provenance,
         authorized_by, content, content_hash, content_chars, captured_at, effective_at, scope_general,
         scope_category, scope_product, scope_seller, scope_channel, scope_membership, review_state,
-        pii_suspected, supersedes_id, client_ref, retention_until, deleted_at });
+        pii_suspected, supersedes_id, client_ref, retention_until, deleted_at,
+        parsed_days, parsed_category });
       return {};
     }
+    if (s.startsWith("INSERT INTO policy_change")) { cambios.push({ id: args[0], merchant_domain: args[1], kind: args[5], summary: args[10] }); return {}; }
     if (s.startsWith("INSERT INTO policy_corpus_use")) {
       usos.push({ corpus_id: args[0], used_at: args[1], context_kind: args[2], verdict: args[4] });
       return {};
@@ -80,7 +83,7 @@ function dbFalsa() {
     const s = sql.replace(/\s+/g, " ").trim();
     if (s.startsWith("SELECT id FROM policy_corpus WHERE merchant_domain = ? AND content_hash"))
       return filas.find((f) => f.merchant_domain === args[0] && f.content_hash === args[1]) || null;
-    if (s.startsWith("SELECT id FROM policy_corpus WHERE merchant_domain = ? AND deleted_at IS NULL"))
+    if (s.startsWith("SELECT id, parsed_days, parsed_category FROM policy_corpus WHERE merchant_domain = ? AND deleted_at IS NULL"))
       return [...filas].reverse().find((f) => f.merchant_domain === args[0] && !f.deleted_at) || null;
     if (s.includes("COUNT(*) AS n FROM policy_corpus WHERE merchant_domain"))
       return { n: filas.filter((f) => f.merchant_domain === args[0] && !f.deleted_at).length };
@@ -94,7 +97,7 @@ function dbFalsa() {
     return {};
   };
   return {
-    _filas: filas, _usos: usos,
+    _filas: filas, _usos: usos, _cambios: cambios,
     prepare: (sql) => ({
       bind: (...args) => ({ run: async () => run(sql, args), first: async () => first(sql, args), all: async () => ({ results: [] }) }),
       run: async () => run(sql, []), first: async () => first(sql, []), all: async () => ({ results: [] }),
