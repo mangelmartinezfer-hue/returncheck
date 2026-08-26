@@ -352,6 +352,41 @@ export function conditionExclusionClause(policyText, itemCondition) {
   return null;
 }
 
+// W13 — LA IMAGEN EN EL ESPEJO DE C15.
+//
+// Encontrado en el holdout de 25 (RC25-17, 26 ago), que es justo lo que el banco
+// propio no podia ver. Politica de un cepillo electrico:
+//
+//   "...may be returned within 14 calendar days ... only when the retail seal is unbroken."
+//   "Opened hygiene products are not eligible for return."     <- lo que cita
+//
+// El articulo viene SIN ABRIR. El modelo cita la segunda frase y firma NO. Y el
+// guard de siempre la acepta, porque la frase ES una negacion de devolucion de
+// verdad: clauseSupportsVerdict(cita, NO) da true. Lo que nadie miraba es que esa
+// frase habla de articulos ABIERTOS y este no lo esta. La cita es real, la
+// negacion es real, y aun asi no demuestra nada sobre ESTE articulo.
+//
+// C15 protege el caso contrario —una frase de "sin abrir" usada para un articulo
+// abierto—. Este es su espejo, y no estaba cubierto.
+//
+// La salida es UNKNOWN, no darle la vuelta al veredicto: que la exclusion no
+// aplique no prueba que se pueda devolver, solo que esa cita no lo resuelve.
+const OPENED_SCOPE_RE =
+  /\b(?:opened|used|worn|unsealed|activated)\b|\bseal(?:s)? (?:is|are|has been|have been) broken\b|\bbroken seal\b/i;
+const SEALED_SCOPE_RE = /\b(?:unopened|unused|new|sealed|intact|unbroken)\b/i;
+
+export function negativeClauseWrongCondition(clause, itemCondition) {
+  if (!clause) return false;
+  // Solo para articulos sellados: es la direccion en la que un NO indebido hace dano.
+  if (itemCondition !== "unopened" && itemCondition !== "new") return false;
+  if (!NON_RETURN.test(clause)) return false;      // tiene que ser una negacion
+  if (!OPENED_SCOPE_RE.test(clause)) return false; // acotada a abierto/usado
+  // Si la MISMA frase tambien nombra lo sellado ("opened or unopened, ... cannot
+  // be returned"), entonces si cubre este articulo y no hay nada que corregir.
+  if (SEALED_SCOPE_RE.test(clause)) return false;
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // W05 — FRASES CANDIDATAS.
 //
