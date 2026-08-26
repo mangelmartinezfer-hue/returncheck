@@ -10,7 +10,8 @@ import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerd
   candidateClauses, candidateBlock, pickClause, usableAnswerHuman,
          policyKeywordHits, policyLinkCandidates,
           clauseIsJurisdictionConditional, policyDefersToSeller,
-          clausePositiveButUnverifiedForOpenedItem, conditionExclusionClause, guessedPolicyUrls } from "./text.mjs";
+          clausePositiveButUnverifiedForOpenedItem, conditionExclusionClause,
+          negativeClauseWrongCondition, guessedPolicyUrls } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
 
@@ -362,6 +363,19 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
                     resp.reason = "The cited clause only shows new/sealed-item language; it does not explicitly exclude the opened/used condition of this item.";
                     resp.answer_human = "Unknown. The cited clause does not clearly cover an opened/used item.";
                   }
+         }
+
+         // SEGURIDAD W13 (determinista): un NO apoyado en una clausula que excluye una
+         // condicion que este articulo NO tiene. La cita es real y niega devoluciones de
+         // verdad, asi que clauseSupportsVerdict la da por buena; lo que no comprueba
+         // nadie es que hable de OTRA condicion. Encontrado en RC25-17 del holdout.
+         if (resp.verdict === "NO" && resp.evidence &&
+             negativeClauseWrongCondition(resp.evidence.exact_clause, req.item_condition)) {
+                  markGuard(resp, "negative_clause_wrong_condition", resp.evidence.exact_clause);
+                  resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
+                  resp.confidence = 0; resp.policy = null; resp.evidence = null;
+                  resp.reason = "The cited clause excludes a condition this item does not have; it does not establish that this item is non-returnable.";
+                  resp.answer_human = "Unknown. The cited exclusion applies to a different item condition than this one.";
          }
   // Reconciliar categoría con veredicto: si es devolvible no puede ser NotPermitted.
   if (resp.policy && resp.verdict !== "NO" && resp.policy.return_category === "NotPermitted") {

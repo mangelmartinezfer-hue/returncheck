@@ -21,7 +21,7 @@ import { clauseInText } from "./text.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w06-holdout-25";
+const BUILD = "2026-08-26-w13-cita-negativa";
 
 // W09 — Autorizacion de administrador.
 //
