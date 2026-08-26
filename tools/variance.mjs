@@ -128,7 +128,10 @@ for (let i = 1; i <= N; i++) {
   }
   const v = r.resp.verdict;
   const marca = v === CASE.esperado ? "ok " : "!! ";
-  console.log("  " + String(i).padStart(2) + ")  " + marca + v.padEnd(20) + String(r.ms).padStart(5) + " ms");
+  // W05: de donde salio la cita. Es la pregunta que decide si el merito es de
+  // RESOLVER el numero o solo de ENSEÑAR la lista, y son dos inversiones distintas.
+  const origen = (r.resp.meta && r.resp.meta.clause_from_candidate) ? "candidata" : "cita libre";
+  console.log("  " + String(i).padStart(2) + ")  " + marca + v.padEnd(20) + String(r.ms).padStart(5) + " ms   " + origen);
 }
 
 const buenos = resultados.filter(r => r.ok);
@@ -145,9 +148,12 @@ for (const r of buenos) {
 const ordenados = [...grupos.entries()].sort((a, b) => b[1] - a[1]);
 const correctos = buenos.filter(r => r.resp.verdict === CASE.esperado).length;
 
+const porCandidata = buenos.filter(r => r.resp.meta && r.resp.meta.clause_from_candidate).length;
+
 console.log("");
 console.log("  Respuestas distintas: " + ordenados.length + " sobre " + buenos.length + " pasadas");
 console.log("  Veredicto esperado  : " + correctos + "/" + buenos.length);
+console.log("  Cita de una candidata: " + porCandidata + "/" + buenos.length);
 console.log("  ─────────────────────────────────────────────");
 for (const [h, n] of ordenados) {
   console.log("  ×" + String(n).padStart(2) + "  " + h);
@@ -159,6 +165,19 @@ if (ordenados.length === 1) {
   console.log("  INESTABLE. " + ordenados.length + " respuestas distintas al mismo caso.");
 }
 console.log("");
+if (buenos.length) {
+  if (porCandidata === 0) {
+    console.log("  Ninguna cita salio de resolver el numero. Si esta rama va mejor que");
+    console.log("  la de sin lista, el merito es de ENSEÑAR la lista, no de resolverla.");
+  } else if (porCandidata === buenos.length) {
+    console.log("  Todas las citas salieron de resolver el numero: el rescate esta");
+    console.log("  haciendo el trabajo.");
+  } else {
+    console.log("  Mezcla: " + porCandidata + " citas rescatadas por numero y " + (buenos.length - porCandidata));
+    console.log("  acertadas de primeras. Las dos partes del cambio aportan.");
+  }
+  console.log("");
+}
 console.log("  Recuerda: una tanda estable no prueba determinismo, solo que no");
 console.log("  se vio variación en " + buenos.length + " intentos. Compara SIEMPRE dos");
 console.log("  configuraciones con la misma N contra el mismo build.");

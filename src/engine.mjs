@@ -7,7 +7,7 @@ import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
-  candidateClauses, candidateBlock, pickClause,
+  candidateClauses, candidateBlock, pickClause, usableAnswerHuman,
          policyKeywordHits, policyLinkCandidates,
           clauseIsJurisdictionConditional, policyDefersToSeller,
           clausePositiveButUnverifiedForOpenedItem, guessedPolicyUrls } from "./text.mjs";
@@ -317,8 +317,11 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
   if (resp.policy && resp.verdict !== "NO" && resp.policy.return_category === "NotPermitted") {
     resp.policy.return_category = resp.policy.merchant_return_days != null ? "FiniteReturnWindow" : "UnlimitedWindow";
   }
-  // Texto humano de respaldo si el modelo se queda demasiado corto.
-  if (!resp.answer_human || resp.answer_human.trim().length < 12) {
+  // W08 — Texto humano de respaldo. Antes solo miraba la LONGITUD, asi que
+  // "YES_WITH_CONDITIONS" (19 caracteres) pasaba el filtro con un veredicto NO.
+  // Ahora tambien se sustituye cuando el texto es una fuga de enum o afirma lo
+  // contrario del veredicto: nunca puede salir una respuesta que se contradiga.
+  if (!usableAnswerHuman(resp.answer_human, resp.verdict)) {
     if (resp.verdict === "NO") resp.answer_human = "No. This item is not returnable under the merchant's published policy for this case.";
     else if (resp.verdict === "UNKNOWN") resp.answer_human = "Unknown. The published policy does not resolve this specific case.";
     else {

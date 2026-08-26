@@ -370,3 +370,52 @@ export function pickClause(evidence, policyText, enabled = true) {
   if (id > candidates.length) return free;   // índice inventado: no lo premiamos
   return candidates[id - 1];
 }
+
+// ---------------------------------------------------------------------------
+// W08 — ¿Es utilizable el texto humano de la respuesta?
+//
+// Fallo real visto en produccion el 26 ago: verdict "NO" con
+// answer_human "YES_WITH_CONDITIONS". El modelo devolvio el NOMBRE DEL ENUM como
+// si fuera prosa, y contradice el veredicto de la misma respuesta.
+//
+// El respaldo que habia solo sustituia el texto si media menos de 12 caracteres.
+// "YES_WITH_CONDITIONS" mide 19: pasaba el filtro y salia a produccion. Un cliente
+// que lea answer_human lee lo contrario de lo que dice verdict. Es la misma familia
+// que el "si" falso de W07: la respuesta se contradice a si misma, y encima en el
+// campo que lee una persona.
+//
+// Criterio deliberadamente CONSERVADOR: no corregimos la prosa del modelo en
+// general, solo la sustituimos cuando es demostrablemente inservible. Dos clases:
+//   1. Fuga de enum: el texto ES el nombre de un valor del contrato.
+//   2. Polaridad opuesta: empieza afirmando lo contrario del veredicto.
+// Fuera de esos dos casos se respeta lo que escribio el modelo, aunque sea flojo.
+// ---------------------------------------------------------------------------
+
+const ENUM_LEAK = new Set(["yes", "no", "unknown", "yes with conditions"]);
+
+function opener(text) {
+  // La polaridad de una respuesta se declara al principio. Solo miramos la
+  // primera palabra, y solo si va seguida de puntuacion o es el texto entero:
+  // asi "No restocking fee applies" NO cuenta como negacion, porque ahi "no"
+  // es un adjetivo, no la respuesta. Ese matiz es la diferencia entre arreglar
+  // el fallo y romper respuestas correctas.
+  const m = String(text || "").trim().toLowerCase().match(/^([a-z]+)\s*([.,;:!—-]|$)/);
+  return m ? m[1] : null;
+}
+
+export function usableAnswerHuman(text, verdict) {
+  const t = String(text || "").trim();
+  if (t.length < 12) return false;                       // criterio anterior, se conserva
+
+  const flat = t.toLowerCase().replace(/_/g, " ").replace(/[.,;:!?"'—-]/g, "").replace(/\s+/g, " ").trim();
+  if (ENUM_LEAK.has(flat)) return false;                 // 1. fuga de enum
+
+  const head = opener(t);                                // 2. polaridad opuesta
+  if (!head) return true;
+  if (verdict === "NO" && head === "yes") return false;
+  if ((verdict === "YES" || verdict === "YES_WITH_CONDITIONS") && head === "no") return false;
+  if (verdict !== "UNKNOWN" && head === "unknown") return false;
+  if (verdict === "UNKNOWN" && (head === "yes" || head === "no")) return false;
+
+  return true;
+}
