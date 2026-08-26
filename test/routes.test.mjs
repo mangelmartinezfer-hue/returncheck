@@ -114,6 +114,15 @@ test("W09: /eval acepta la clave por cabecera", async () => {
   assert.equal(r.status, 200);
 });
 
+// W05 — el banco tiene que decir de dónde salieron las citas. Una prueba de que
+// el campo EXISTE, porque un campo que se cae del volcado no rompe nada: solo
+// deja de contestar la pregunta, y nadie se entera hasta la siguiente medición.
+test("W05: /eval publica el recuento de citas rescatadas por número", async () => {
+  const j = await (await pide("/eval?count=0", { authorization: "Bearer clave-de-prueba-no-real" })).json();
+  assert.equal(typeof j.clauses_rescued_by_candidate, "number");
+  assert.equal(typeof j.clauses_cited, "number");
+});
+
 test("W09: se conserva ?k= — el panel se abre pegando la URL y romperlo hoy no arregla nada", async () => {
   assert.equal((await pide("/stats?k=clave-de-prueba-no-real")).status, 200);
   assert.equal((await pide("/dashboard?k=clave-de-prueba-no-real")).status, 200);

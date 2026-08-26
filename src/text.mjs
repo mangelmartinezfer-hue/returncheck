@@ -231,11 +231,38 @@ export function clauseSupportsVerdict(clause, { verdict, days, category, policyT
 // estado/jurisdiccion del comprador. Si la request no trae ese dato, no podemos
 // afirmar nada -> el llamador debe forzar UNKNOWN aunque el modelo diga otra cosa.
 const JURISDICTION_CONDITIONAL_RE =
-  /(where prohibited by law|except where required by law|subject to (state|local) law|varies by state|as (required|permitted) by (state|applicable) law|where applicable law (requires|permits))/i;
+  // "vary" además de "varies": lo destapó una prueba de W10 al dar por hecho que
+  // "Refunds vary by state." ya estaba cubierto. No lo estaba — solo entraba la
+  // forma en singular. Un hueco de una letra, invisible hasta que se escribe la
+  // prueba con el caso real delante.
+  /(where prohibited by law|except where required by law|subject to (state|local) law|var(?:y|ies) by state|as (required|permitted) by (state|applicable) law|where applicable law (requires|permits))/i;
 
-export function clauseIsJurisdictionConditional(clause) {
+// W10 — POR QUÉ ESTO NO BASTABA. C09 falló 5 de 5 pasadas el 26 ago, siempre con
+// YES_WITH_CONDITIONS donde tocaba UNKNOWN. La causa no era el razonamiento: la
+// página parte la condición en dos frases,
+//
+//   "Returns ... are not accepted where prohibited by law."     <- la condición
+//   "Where returns are permitted, unopened bottles may be ..."  <- lo que cita
+//
+// y el modelo citaba la segunda, que por sí sola no contiene ninguna marca de
+// jurisdicción. El guard miraba solo la cita, así que nunca se disparaba.
+//
+// Una frase que empieza por "Where returns are permitted" NO demuestra nada por
+// sí misma: su propia condición está sin resolver. Pero tampoco basta con
+// prohibir ese giro —"Where permitted, we offer free return shipping" habla de
+// portes, no de si se puede devolver— así que se exigen las dos señales: la cita
+// está condicionada Y su vecindad contiene la condición legal. Es la vecindad
+// (±1 frase, mismo criterio que W04) y no la página entera, para que una cláusula
+// de tarjetas regalo en otro párrafo no tumbe un veredicto correcto.
+const PERMISSION_HEDGE_RE =
+  /\b(?:where|wherever|if|unless|except where|to the extent)\b[^.!?\n]{0,40}\b(?:permitted|allowed|prohibited|permissible)\b/i;
+
+export function clauseIsJurisdictionConditional(clause, policyText) {
   if (!clause) return false;
-  return JURISDICTION_CONDITIONAL_RE.test(clause);
+  if (JURISDICTION_CONDITIONAL_RE.test(clause)) return true;
+  if (!policyText || !PERMISSION_HEDGE_RE.test(clause)) return false;
+  const ctx = evidenceContext(clause, policyText, 1);
+  return !!ctx && JURISDICTION_CONDITIONAL_RE.test(ctx.window);
 }
 
 // SEGURIDAD W01 (determinista): algunas plataformas publican una política del
