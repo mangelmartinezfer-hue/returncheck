@@ -20,7 +20,7 @@ import { clauseInText } from "./text.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w10-jurisdiction-scope";
+const BUILD = "2026-08-26-w11-guard-diagnostico";
 
 // W09 — Autorizacion de administrador.
 //
@@ -65,7 +65,7 @@ async function handleEval(request, env, url) {
       page_text: c.page_text,
     };
     let got = "ERROR", policyDays = null, clause = null, hallucination = false, err = null;
-    let via = null, degrade = null, fromCandidate = null;
+    let via = null, degrade = null, fromCandidate = null, guard = null, reason = null;
     try {
       const resp = await runCheck(env, req);
       got = resp.verdict;
@@ -79,6 +79,8 @@ async function handleEval(request, env, url) {
       // se paga en prompt, la segunda en código. El medidor de varianza ya lo
       // decía por caso suelto; aquí falta para el banco entero.
       fromCandidate = resp.meta ? !!resp.meta.clause_from_candidate : null;
+      guard = (resp.meta && resp.meta.guard) || null;   // W11: qué guard abstuvo, si abstuvo alguno
+      reason = resp.reason ?? null;
       if (got !== "UNKNOWN" && clause) hallucination = !clauseInText(clause, c.page_text);
     } catch (e) { err = (e && e.message) || "error"; }
 
@@ -93,9 +95,17 @@ async function handleEval(request, env, url) {
       expected_days: c.expected.days ?? null, got_days: policyDays, daysOk,
       cited_clause: clause,
       clause_from_candidate: fromCandidate,
+      // W11 — antes esto decía "model returned UNKNOWN" siempre que no hubiera
+      // `degrade`, que solo pone UNO de los cuatro guards. Los otros tres se
+      // etiquetaban como abstención del modelo: el diagnóstico afirmaba lo que
+      // no sabía, y el 26 ago estuvo a punto de costar una decisión equivocada.
       unknown_reason: (got === "UNKNOWN")
-        ? (degrade ? ("degraded: cited clause did not support verdict — " + (degrade.rejected_clause || "")) : "model returned UNKNOWN")
+        ? (guard ? ("guard: " + guard.name + " — " + (guard.rejected_clause || "(sin cita)"))
+                 : "model returned UNKNOWN")
         : null,
+      guard: guard ? guard.name : null,
+      guard_rejected_clause: guard ? guard.rejected_clause : null,
+      reason,
       hallucination, errorType, via, degrade, error: err, note: c.note,
     });
   }
@@ -109,6 +119,15 @@ async function handleEval(request, env, url) {
   const halluc = results.filter(r => r.hallucination).length;
   const safeMiss = results.filter(r => r.errorType === "safe_miss").length;
   const unsafe = results.filter(r => r.errorType === "UNSAFE").length;
+  // W11 — reparto de las abstenciones. Un banco con 6 UNKNOWN no dice lo mismo si
+  // los pone el modelo (falta capacidad) que si los pone un guard (falta cita), y
+  // hasta ahora el resumen no permitía distinguirlo de un vistazo.
+  const guards = {};
+  for (const r of results) {
+    if (r.got !== "UNKNOWN") continue;
+    const k = r.guard || "model_returned_unknown";
+    guards[k] = (guards[k] || 0) + 1;
+  }
   const rescued = results.filter(r => r.clause_from_candidate === true).length;
   const cited = results.filter(r => r.cited_clause).length;
   const pct = (a, b) => b ? Math.round((a / b) * 1000) / 10 : 0;
@@ -133,6 +152,7 @@ async function handleEval(request, env, url) {
     // distintas y hasta ahora el banco no lo decía.
     clauses_rescued_by_candidate: rescued,
     clauses_cited: cited,
+    unknown_breakdown: guards,               // W11: quién abstuvo — cada guard por su nombre, y el modelo por el suyo
     results,
   }, { headers: { "access-control-allow-origin": "*" } });
 }

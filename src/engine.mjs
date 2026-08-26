@@ -210,6 +210,22 @@ async function extract(env, policyText, req) {
 }
 
 // Ensambla la respuesta completa del contrato a partir de lo que devolvió la IA.
+// W11 — QUE EL DIAGNOSTICO NO MIENTA.
+//
+// Los guards deterministas (C06, C09, C15) hacen resp.evidence = null y no
+// dejaban ninguna huella. /eval solo sabia mirar meta.degrade, que lo pone un
+// unico guard, asi que TODO lo demas se etiquetaba "model returned UNKNOWN".
+// El 26 ago eso estuvo a punto de costar una decision equivocada: se leyo esa
+// etiqueta como prueba de que el arreglo de C09 no habia hecho nada, cuando en
+// realidad el guard si habia actuado. La etiqueta afirmaba mas de lo que sabia.
+//
+// Ahora cada guard firma. Y guarda la cita que rechazo, que es justo lo que hace
+// falta para saber por que un caso se abstiene: no es lo mismo que el modelo no
+// conteste a que conteste citando la frase equivocada. Son dos arreglos distintos.
+function markGuard(resp, name, rejectedClause) {
+  resp.meta = { ...resp.meta, guard: { name, rejected_clause: rejectedClause || null } };
+}
+
 async function assemble(ai, req, policyText, meta, sourceUrl) {
   const source = sourceUrl || req.product_url;
   const domainFromUrl = (() => { try { return new URL(req.product_url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
@@ -277,6 +293,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
         policyText, // W04: mismo criterio que el guard real, para que el diagnóstico no mienta
       }),
     } };
+    markGuard(resp, "clause_unsupported", (ai.evidence && ai.evidence.exact_clause) || null);
     resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
     resp.confidence = 0; resp.policy = null; resp.evidence = null;
     resp.reason = "The cited clause could not be verified as supporting the verdict on the page; not asserting a verdict.";
@@ -291,6 +308,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
     resp.confidence = 0; resp.policy = null; resp.evidence = null;
     resp.reason = "Item is sold by a named third-party seller; the page states only the host policy and the seller's own policy is not available.";
     resp.answer_human = "Unknown. This item is sold by a third-party seller whose own return policy is not on this page.";
+    markGuard(resp, "third_party_seller", ai.evidence && ai.evidence.exact_clause);
   }
 
 
@@ -298,6 +316,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
          // request no trae el estado del comprador -> no podemos afirmar. Cierra la trampa C09.
          if (resp.verdict !== "UNKNOWN" && resp.evidence &&
              clauseIsJurisdictionConditional(resp.evidence.exact_clause, policyText) && !req.buyer_state) {
+                  markGuard(resp, "jurisdiction_conditional", resp.evidence.exact_clause);
                   resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
                   resp.confidence = 0; resp.policy = null; resp.evidence = null;
                   resp.reason = "The cited clause conditions the outcome on state/jurisdiction law, and the buyer's state is not provided.";
@@ -308,6 +327,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
          // excluir esa condicion explicitamente -> no esta demostrado. Cierra la trampa C15.
          if (resp.verdict !== "UNKNOWN" && resp.evidence &&
              clausePositiveButUnverifiedForOpenedItem(resp.evidence.exact_clause, req.item_condition)) {
+                  markGuard(resp, "opened_item_unverified", resp.evidence.exact_clause);
                   resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
                   resp.confidence = 0; resp.policy = null; resp.evidence = null;
                   resp.reason = "The cited clause only shows new/sealed-item language; it does not explicitly exclude the opened/used condition of this item.";
