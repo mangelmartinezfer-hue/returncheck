@@ -20,7 +20,7 @@ import { clauseInText } from "./text.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w09-admin-header";
+const BUILD = "2026-08-26-w10-jurisdiction-scope";
 
 // W09 — Autorizacion de administrador.
 //
@@ -65,7 +65,7 @@ async function handleEval(request, env, url) {
       page_text: c.page_text,
     };
     let got = "ERROR", policyDays = null, clause = null, hallucination = false, err = null;
-    let via = null, degrade = null;
+    let via = null, degrade = null, fromCandidate = null;
     try {
       const resp = await runCheck(env, req);
       got = resp.verdict;
@@ -73,6 +73,12 @@ async function handleEval(request, env, url) {
       clause = resp.evidence ? resp.evidence.exact_clause : null;
       via = resp.meta ? resp.meta.checked_via : null;
       degrade = resp.meta && resp.meta.degrade ? resp.meta.degrade : null; // por qué se degradó a UNKNOWN
+      // W05 — de dónde salió la cita. Sin este dato no se puede distinguir si la
+      // mejora del 25 ago vino de ENSEÑAR la lista numerada al modelo o de
+      // RESOLVER el número que eligió. Son dos inversiones distintas: la primera
+      // se paga en prompt, la segunda en código. El medidor de varianza ya lo
+      // decía por caso suelto; aquí falta para el banco entero.
+      fromCandidate = resp.meta ? !!resp.meta.clause_from_candidate : null;
       if (got !== "UNKNOWN" && clause) hallucination = !clauseInText(clause, c.page_text);
     } catch (e) { err = (e && e.message) || "error"; }
 
@@ -86,6 +92,7 @@ async function handleEval(request, env, url) {
       id: c.id, trap: !!c.trap, expected, got, correct, determinate,
       expected_days: c.expected.days ?? null, got_days: policyDays, daysOk,
       cited_clause: clause,
+      clause_from_candidate: fromCandidate,
       unknown_reason: (got === "UNKNOWN")
         ? (degrade ? ("degraded: cited clause did not support verdict — " + (degrade.rejected_clause || "")) : "model returned UNKNOWN")
         : null,
@@ -102,6 +109,8 @@ async function handleEval(request, env, url) {
   const halluc = results.filter(r => r.hallucination).length;
   const safeMiss = results.filter(r => r.errorType === "safe_miss").length;
   const unsafe = results.filter(r => r.errorType === "UNSAFE").length;
+  const rescued = results.filter(r => r.clause_from_candidate === true).length;
+  const cited = results.filter(r => r.cited_clause).length;
   const pct = (a, b) => b ? Math.round((a / b) * 1000) / 10 : 0;
 
   return json({
@@ -119,6 +128,11 @@ async function handleEval(request, env, url) {
     safe_misses: safeMiss,                          // debía ser determinado pero dijo UNKNOWN (conservador)
     traps_total: traps.length,
     traps_held: trapsHeld,                          // trampas resueltas con UNKNOWN (bien)
+    // W05 — cuántas citas se salvaron resolviendo el número de la lista, sobre
+    // cuántas respuestas llegaron a citar algo. 0/N y N/N significan cosas muy
+    // distintas y hasta ahora el banco no lo decía.
+    clauses_rescued_by_candidate: rescued,
+    clauses_cited: cited,
     results,
   }, { headers: { "access-control-allow-origin": "*" } });
 }

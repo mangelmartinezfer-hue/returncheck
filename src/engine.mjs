@@ -297,7 +297,7 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
          // SEGURIDAD C09 (determinista): clausula condicionada a la ley del estado y la
          // request no trae el estado del comprador -> no podemos afirmar. Cierra la trampa C09.
          if (resp.verdict !== "UNKNOWN" && resp.evidence &&
-             clauseIsJurisdictionConditional(resp.evidence.exact_clause) && !req.buyer_state) {
+             clauseIsJurisdictionConditional(resp.evidence.exact_clause, policyText) && !req.buyer_state) {
                   resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
                   resp.confidence = 0; resp.policy = null; resp.evidence = null;
                   resp.reason = "The cited clause conditions the outcome on state/jurisdiction law, and the buyer's state is not provided.";
