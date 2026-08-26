@@ -18,10 +18,11 @@ import { json, errorResponse, todayDate } from "./util.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
+import { corpusStats, deleteMerchantCorpus } from "./corpus.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w13-cita-negativa";
+const BUILD = "2026-08-26-w14-captura-corpus";
 
 // W09 — Autorizacion de administrador.
 //
@@ -572,7 +573,7 @@ async function handleCheck(request, env) {
   // 4) Motor (errores de proceso -> NO se cobra)
   let resp;
   try {
-    resp = await runCheck(env, v.value);
+    resp = await runCheck(env, { ...v.value, __api_key: apiKey });
   } catch (e) {
     if (e instanceof EngineError) return errorResponse(e.code, e.message, e.http);
     return errorResponse("INTERNAL", "Unexpected error.", 500);
@@ -694,6 +695,26 @@ export default {
       // Panel de control (protegido con clave de administrador).
       if (request.method === "GET" && p === "/stats") return await handleStats(request, env, url);
       if (request.method === "GET" && p === "/eval") return await handleEval(request, env, url);
+
+      // W14 — Administracion del corpus. La via de borrado por comercio existe
+      // ANTES de que haga falta: es la contrapartida de haber decidido guardarlo
+      // todo (doc 40). Si un comercio reclama, esto tiene que funcionar a la
+      // primera y sin improvisar.
+      if (request.method === "GET" && p === "/admin/corpus") {
+        if (!adminOk(request, url, env)) return errorResponse("INVALID_INPUT", "Not found.", 404);
+        return json(await corpusStats(env));
+      }
+      if (request.method === "POST" && p === "/admin/corpus/delete") {
+        if (!adminOk(request, url, env)) return errorResponse("INVALID_INPUT", "Not found.", 404);
+        const body = await request.json().catch(() => ({}));
+        if (!body || !body.domain)
+          return errorResponse("INVALID_INPUT", "domain is required.", 400);
+        // El purgado fisico se pide a proposito: un borrado por error se puede
+        // deshacer mientras siga siendo logico.
+        const r = await deleteMerchantCorpus(env, body.domain, { purge: body.purge === true });
+        if (!r.ok) return errorResponse("INVALID_INPUT", r.error, 400);
+        return json(r);
+      }
       if (request.method === "GET" && p === "/dashboard") return dashboardPage(env, url);
       // Ruta de PRUEBA (sin cobro), PROTEGIDA con clave. Para enseñar la demo sin abuso.
       // TODO: quitar del todo antes del lanzamiento público.

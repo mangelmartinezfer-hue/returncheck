@@ -14,6 +14,7 @@ import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerd
           negativeClauseWrongCondition, guessedPolicyUrls } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
+import { capturePolicy, recordCorpusUse } from "./corpus.mjs";
 
 class EngineError extends Error {
   constructor(code, http, message) { super(message); this.code = code; this.http = http; }
@@ -566,6 +567,21 @@ export async function runCheck(env, req) {
                  clause_from_candidate };
   if (discovered_url) meta.discovered_policy_url = discovered_url;
   const resp = await assemble(ai, req, policyText, meta, sourceUrl);
+
+  // W14 — LA PUERTA. Se guarda la politica que acabamos de leer, ANTES de que
+  // llegue el trafico y no despues. Nunca rompe la consulta: si falla, devuelve
+  // null y el cliente no se entera. Ver src/corpus.mjs para el porque.
+  const corpusId = await capturePolicy(env, {
+    policyText, sourceUrl, via: checked_via,
+    merchantName: resp.merchant_resolved && resp.merchant_resolved.name,
+    country: resp.merchant_resolved && resp.merchant_resolved.country,
+    apiKey: req.__api_key,
+    scope: { seller: req.seller_name || null, channel: req.purchase_channel || null, membership: req.membership || null },
+  });
+  if (corpusId) {
+    resp.meta = { ...resp.meta, corpus_id: corpusId };
+    await recordCorpusUse(env, corpusId, resp.verdict);
+  }
   const inv = checkInvariants(resp);
   if (!inv.ok) {
     // Nunca reventamos: si el resultado no es válido, degradamos a UNKNOWN honesto.
