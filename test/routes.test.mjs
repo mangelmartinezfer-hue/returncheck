@@ -123,6 +123,11 @@ test("W05: /eval publica el recuento de citas rescatadas por número", async () 
   assert.equal(typeof j.clauses_cited, "number");
 });
 
+test("W11: /eval publica el reparto de abstenciones", async () => {
+  const j = await (await pide("/eval?count=0", { authorization: "Bearer clave-de-prueba-no-real" })).json();
+  assert.equal(typeof j.unknown_breakdown, "object");
+});
+
 test("W09: se conserva ?k= — el panel se abre pegando la URL y romperlo hoy no arregla nada", async () => {
   assert.equal((await pide("/stats?k=clave-de-prueba-no-real")).status, 200);
   assert.equal((await pide("/dashboard?k=clave-de-prueba-no-real")).status, 200);
