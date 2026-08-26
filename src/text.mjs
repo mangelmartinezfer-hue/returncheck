@@ -276,3 +276,97 @@ export function clausePositiveButUnverifiedForOpenedItem(clause, itemCondition) 
   const hasSealedLanguage = SEALED_NEW_LANGUAGE_RE.test(clause);
   return hasSealedLanguage && !hasExclusion;
 }
+
+// ---------------------------------------------------------------------------
+// W05 — FRASES CANDIDATAS.
+//
+// El hallazgo del 25 ago (doc 44): con la temperatura ya a 0, las 10 respuestas
+// útiles de dos tandas salieron IDÉNTICAS —mismo plazo, misma base, misma fecha,
+// misma cláusula—. El motor no duda cuando razona. Toda la varianza es binaria:
+// o el modelo da con la frase que hay que citar, o no da y el guard degrada a
+// UNKNOWN. No es un modelo aleatorio: es un modelo que a veces no encuentra la
+// frase.
+//
+// Así que dejamos de pedirle que la ESCRIBA y pasamos a que la ELIJA. Extraemos
+// por código las frases plausibles de la política, se las damos numeradas, y
+// devuelve un número. La cita deja de depender de que copie bien: queda
+// garantizada por construcción, no rescatada por un guard a posteriori.
+//
+// Es la misma jugada que W01, W02, W04 y W07: mover una decisión del modelo al
+// código. Aquí la decisión movida es "¿existe esta frase?".
+// ---------------------------------------------------------------------------
+
+const RETURN_VOCAB = /\b(?:returns?|returned|returnable|returning|refunds?|refunded|refundable|exchanges?|exchanged|restocking|final sale|store credit|money back)\b/i;
+const NON_RETURN = /\b(?:non-?returnable|not returnable|cannot be returned|no returns?|final sale|not eligible for return)\b/i;
+const DAYS_IN_SENTENCE = /\b\d{1,3}\s*(?:calendar\s+|business\s+|working\s+)?days?\b/i;
+
+// Extrae las frases de la política que PODRÍAN ser la cita. Determinista: mismo
+// texto -> misma lista, siempre. Eso es lo que permite resolver un índice más
+// tarde sin arrastrar estado entre funciones.
+// max = 12 a proposito, no por casualidad: la lista se ANADE al texto de la
+// politica en el mismo mensaje, asi que cada candidata cuesta prompt, latencia y
+// dinero. Y para un modelo de 8B, veinte opciones no son mas ayuda que doce: son
+// mas sitios donde equivocarse. Si la medicion dice que se queda corta, se sube.
+export function candidateClauses(policyText, { max = 12, minLen = 30, maxLen = 400 } = {}) {
+  if (!policyText) return [];
+
+  const found = [];
+  const seen = new Set();
+  const sentences = splitSentences(policyText);
+
+  for (let i = 0; i < sentences.length; i++) {
+    const s = sentences[i].replace(/\s+/g, " ").trim();
+    // Fuera títulos sueltos ("Returns") y párrafos gigantes que no son una cláusula.
+    if (s.length < minLen || s.length > maxLen) continue;
+    const hasDays = DAYS_IN_SENTENCE.test(s);
+    const hasVocab = RETURN_VOCAB.test(s);
+    if (!hasDays && !hasVocab) continue;
+
+    const key = s.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    // La puntuación solo decide QUÉ se recorta cuando sobran candidatas.
+    // Una frase con plazo vale más que una que solo menciona devoluciones:
+    // es la que los guards necesitan para verificar el veredicto.
+    let score = 0;
+    if (hasDays && hasVocab) score += 3;
+    else if (hasDays) score += 2;
+    else score += 1;
+    if (NON_RETURN.test(s)) score += 1;   // las exclusiones deciden NOes
+
+    found.push({ i, s, score });
+  }
+
+  if (found.length <= max) return found.map((f) => f.s);
+
+  // Nos quedamos con las mejores, pero devolvemos en ORDEN DE LECTURA: una lista
+  // desordenada respecto a la página confunde al modelo y a quien depure esto.
+  const keep = found.slice().sort((a, b) => b.score - a.score || a.i - b.i).slice(0, max);
+  keep.sort((a, b) => a.i - b.i);
+  return keep.map((f) => f.s);
+}
+
+// Formatea el bloque numerado que se le enseña al modelo. Base 1: un "0" ambiguo
+// entre "el primero" y "ninguno" es justo el tipo de detalle que cuesta una tarde.
+export function candidateBlock(candidates) {
+  if (!candidates || !candidates.length) return "";
+  return candidates.map((c, n) => `[${n + 1}] ${c}`).join("\n");
+}
+
+// Resuelve qué cita usar. El orden importa y es deliberado:
+//   1. Si el modelo eligió una candidata válida -> esa, literal de la página.
+//   2. Si no eligió, o eligió un número imposible -> su cita libre de siempre.
+// Nunca puede empeorar respecto al comportamiento anterior: en el peor caso
+// cae exactamente en él. Un despliegue que solo puede mejorar o empatar.
+export function pickClause(evidence, policyText, enabled = true) {
+  const free = (evidence && evidence.exact_clause) || null;
+  if (!enabled || !evidence) return free;
+
+  const id = evidence.clause_id;
+  if (!Number.isInteger(id) || id < 1) return free;
+
+  const candidates = candidateClauses(policyText);
+  if (id > candidates.length) return free;   // índice inventado: no lo premiamos
+  return candidates[id - 1];
+}

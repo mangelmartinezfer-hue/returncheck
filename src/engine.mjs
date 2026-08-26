@@ -7,6 +7,7 @@ import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
 import { todayDate, addDays, sha256hex } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
+  candidateClauses, candidateBlock, pickClause,
          policyKeywordHits, policyLinkCandidates,
           clauseIsJurisdictionConditional, policyDefersToSeller,
           clausePositiveButUnverifiedForOpenedItem, guessedPolicyUrls } from "./text.mjs";
@@ -157,14 +158,28 @@ function coerceJson(out) {
   try { return JSON.parse(s); } catch { return null; }
 }
 
+// W05 — una sola definicion de si las frases candidatas estan encendidas.
+// Dos lecturas separadas de la misma variable acabarian divergiendo algun dia.
+function candidatesEnabled(env) {
+  return String((env && env.USE_CANDIDATES) ?? "true") !== "false";
+}
+
 // Llama al modelo con decodificación restringida a esquema. Reintenta una vez si
 // el modelo no devuelve JSON limpio (endurecido tras ver 500 en producción).
 async function extract(env, policyText, req) {
+  // W05: lista determinista de frases candidatas. Vacia si esta desactivado o si
+  // el texto no tiene ninguna: en ambos casos el modelo cita libremente, como antes.
+  const candidates = candidatesEnabled(env) ? candidateClauses(policyText) : [];
+  const candidatesMsg = candidates.length
+    ? `CANDIDATE CLAUSES (verbatim from the policy above; pick one by number):\n${candidateBlock(candidates)}\n`
+    : "";
+
   const userMsg =
     `PRODUCT_URL: ${req.product_url}\n` +
     `REQUEST: ${JSON.stringify({ buyer_country: req.buyer_country, item_condition: req.item_condition || null, reason: req.reason || null, membership: req.membership || null, purchase_channel: req.purchase_channel || null })}\n` +
     `TODAY: ${todayDate()}\n` +
-    `POLICY TEXT:\n${policyText}`;
+    `POLICY TEXT:\n${policyText}\n\n` +
+    candidatesMsg;
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: userMsg },
@@ -466,8 +481,22 @@ export async function runCheck(env, req) {
   };
   const ai_ms = Date.now() - tAi;
 
+  // W05 — si el modelo eligio una frase candidata valida, la cita pasa a ser la
+  // frase LITERAL de la pagina, no lo que el modelo tecleo. Si no eligio, o el
+  // numero es imposible, cae a su cita libre de siempre: este cambio solo puede
+  // mejorar o empatar, nunca empeorar respecto al comportamiento anterior.
+  let clause_from_candidate = false;
+  if (ai.evidence) {
+    const picked = pickClause(ai.evidence, policyText, candidatesEnabled(env));
+    if (picked && picked !== ai.evidence.exact_clause) {
+      clause_from_candidate = true;
+      ai.evidence.exact_clause = picked;
+    }
+  }
+
   // 4) Ensamblar + invariantes
-  const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via, fetch_ms, ai_ms, policy_chars: policyText.length };
+  const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via, fetch_ms, ai_ms, policy_chars: policyText.length,
+                 clause_from_candidate };
   if (discovered_url) meta.discovered_policy_url = discovered_url;
   const resp = await assemble(ai, req, policyText, meta, sourceUrl);
   const inv = checkInvariants(resp);

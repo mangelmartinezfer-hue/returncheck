@@ -64,6 +64,8 @@ Marketplace: if a seller_name is given and the page is the host retailer's own p
 
 Membership/channel: when the policy states different terms depending on membership tier or purchase channel (online/store/marketplace/phone), use the request's membership and purchase_channel to select the applicable clause. If the policy differentiates by membership or channel and the request does not provide the relevant field, that is UNKNOWN, not a guess at the more permissive branch.
 
+CHOOSING THE QUOTE. When the user message includes a numbered CANDIDATE CLAUSES list, that list is extracted verbatim from the policy text you were given. Set evidence.clause_id to the number of the single clause that best proves your verdict, and copy that same clause into evidence.exact_clause. Prefer the clause that states the entitlement AND its window. If none of the candidates proves your verdict, set clause_id to null and quote from the policy text as usual — do not force a candidate that does not fit, and do not invent a number. When no candidate list is given, set clause_id to null.
+
 For a determinate verdict fill policy and evidence. evidence.exact_clause MUST be a verbatim quote copied from the policy text (its own language, never paraphrased). Quote the COMPLETE sentence that grants the return and states its window — never a bare fragment like "within 90 calendar days of purchase". If the entitlement and the window live in different sentences, quote the sentence that grants the return. Map item_condition to the enum (opened/used -> UsedCondition when used is accepted; unopened -> NewCondition); never copy the raw request string. In NotPermitted with no refund, refund_type may be null and return_fees null. Include restocking_fee.currency only when type="amount". merchant_return_days: integer or null. window_basis: "purchase_date" only when the quoted clause explicitly counts from purchase/order, "delivery_date" only when it explicitly counts from delivery/receipt, otherwise null. Never guess the basis from which request dates happen to be present. Do not compute deadline_date (the caller does it). exceptions[] are short snake_case tags.`;
 
 // Esquema de decodificación restringida (subconjunto que rellena la IA).
@@ -102,6 +104,10 @@ export const RESPONSE_SCHEMA = {
       properties: {
         source_url: { type: "string" },
         exact_clause: { type: "string" },
+        // W05: numero de la candidata elegida (base 1), o null si ninguna sirve.
+        // El codigo resuelve el numero contra la lista deterministica, asi que la
+        // cita deja de depender de que el modelo la copie bien.
+        clause_id: { type: ["integer", "null"] },
       },
       required: ["source_url", "exact_clause"],
     },
