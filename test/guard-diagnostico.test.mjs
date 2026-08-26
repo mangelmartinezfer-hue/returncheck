@@ -82,8 +82,12 @@ test("W11: item abierto y cita de \"unopened\" -> guard \"opened_item_unverified
   // Es la hipótesis viva sobre C11: el modelo citaría la frase permisiva de los
   // artículos sin abrir para un artículo abierto. Con la firma se confirma o se
   // descarta de un vistazo, sin gastar una llamada.
-  const poliza = "Software & Digital. Opened software and activated license keys cannot be returned or refunded once the code has been revealed. Unopened physical software may be returned within 15 days.";
-  const cita = "Unopened physical software may be returned within 15 days.";
+  //
+  // La política de aquí NO excluye la condición en ninguna otra frase: por eso
+  // abstenerse sigue siendo lo correcto. Cuando sí la excluye, el veredicto pasa
+  // a ser NO — eso es W12, y vive en su propio fichero.
+  const poliza = "Return Policy. Unopened items may be returned within 15 days of purchase with the original receipt. Refunds go to the original payment method.";
+  const cita = "Unopened items may be returned within 15 days of purchase with the original receipt.";
   const r = await runCheck(envFalso(base({
     policy: { return_category: "FiniteReturnWindow", merchant_return_days: 15, window_basis: "purchase_date",
               return_method: ["ReturnByMail"], return_fees: null, refund_type: "FullRefund" },

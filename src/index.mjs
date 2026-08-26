@@ -20,7 +20,7 @@ import { clauseInText } from "./text.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-26-w11-guard-diagnostico";
+const BUILD = "2026-08-26-w12-condicion-excluida";
 
 // W09 — Autorizacion de administrador.
 //

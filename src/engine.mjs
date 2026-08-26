@@ -10,7 +10,7 @@ import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerd
   candidateClauses, candidateBlock, pickClause, usableAnswerHuman,
          policyKeywordHits, policyLinkCandidates,
           clauseIsJurisdictionConditional, policyDefersToSeller,
-          clausePositiveButUnverifiedForOpenedItem, guessedPolicyUrls } from "./text.mjs";
+          clausePositiveButUnverifiedForOpenedItem, conditionExclusionClause, guessedPolicyUrls } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
 
@@ -327,11 +327,41 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
          // excluir esa condicion explicitamente -> no esta demostrado. Cierra la trampa C15.
          if (resp.verdict !== "UNKNOWN" && resp.evidence &&
              clausePositiveButUnverifiedForOpenedItem(resp.evidence.exact_clause, req.item_condition)) {
-                  markGuard(resp, "opened_item_unverified", resp.evidence.exact_clause);
-                  resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
-                  resp.confidence = 0; resp.policy = null; resp.evidence = null;
-                  resp.reason = "The cited clause only shows new/sealed-item language; it does not explicitly exclude the opened/used condition of this item.";
-                  resp.answer_human = "Unknown. The cited clause does not clearly cover an opened/used item.";
+                  const rejected = resp.evidence.exact_clause;
+                  // W12 — antes de abstenernos: ¿la página excluye explícitamente esta
+                  // condición en otra frase? Si la hay, la respuesta honesta no es
+                  // "no lo sé", es NO. Se le exige el MISMO clauseSupportsVerdict que a
+                  // cualquier otra cita: crear un veredicto determinado es lo único que
+                  // puede fabricar un error peligroso.
+                  const excl = conditionExclusionClause(policyText, req.item_condition);
+                  const exclOk = !!excl && clauseSupportsVerdict(excl, {
+                    verdict: "NO", days: null, category: "NotPermitted", policyText,
+                  });
+                  if (exclOk) {
+                    markGuard(resp, "opened_item_excluded", rejected);
+                    resp.verdict = "NO"; resp.returnable = false; resp.status = "confirmed";
+                    resp.confidence = 0.8;
+                    resp.policy = {
+                      return_category: "NotPermitted", merchant_return_days: null, window_basis: null,
+                      deadline_date: null, return_country: req.buyer_country || null,
+                      applicable_countries: [], return_method: [], return_fees: null,
+                      return_shipping_fees_amount: null, restocking_fee: null, refund_type: null,
+                      item_conditions_accepted: [], required_condition: null, exceptions: [],
+                      seasonal_override: null,
+                    };
+                    resp.evidence = {
+                      source_url: source, exact_clause: excl, verified_on: todayDate(),
+                      freshness_days: 0, policy_version: await sha256hex(policyText),
+                    };
+                    resp.reason = "The policy explicitly excludes items in this condition from returns; the model had cited a clause that only covers new/sealed items.";
+                    resp.answer_human = "No. The merchant's policy excludes items in this condition from returns.";
+                  } else {
+                    markGuard(resp, "opened_item_unverified", rejected);
+                    resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
+                    resp.confidence = 0; resp.policy = null; resp.evidence = null;
+                    resp.reason = "The cited clause only shows new/sealed-item language; it does not explicitly exclude the opened/used condition of this item.";
+                    resp.answer_human = "Unknown. The cited clause does not clearly cover an opened/used item.";
+                  }
          }
   // Reconciliar categoría con veredicto: si es devolvible no puede ser NotPermitted.
   if (resp.policy && resp.verdict !== "NO" && resp.policy.return_category === "NotPermitted") {

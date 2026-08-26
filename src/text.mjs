@@ -304,6 +304,54 @@ export function clausePositiveButUnverifiedForOpenedItem(clause, itemCondition) 
   return hasSealedLanguage && !hasExclusion;
 }
 
+// W12 — LA OTRA MITAD DEL GUARD DE C15.
+//
+// Medido el 26 ago: C11_software_opened_NO era el UNICO safe_miss del banco, y
+// con la firma de W11 se vio de donde venia. Su politica solo produce dos frases:
+//
+//   [1] "Opened software ... cannot be returned or refunded once the seal is broken..."
+//   [2] "Unopened physical software may be returned within 15 days."
+//
+// El articulo es ABIERTO. El modelo cita la [2], el guard de C15 ve lenguaje de
+// "sin abrir" sin exclusion y se abstiene. Correcto por lo que mira, pero
+// incompleto: la pagina SI resuelve el caso, y lo resuelve en la frase [1].
+// Nos abstenamos con la respuesta escrita dos frases mas arriba.
+//
+// Asi que antes de abstenernos, buscamos si la politica excluye EXPLICITAMENTE
+// la condicion del articulo. Si la hay, el veredicto honesto no es "no lo se":
+// es NO, y con su cita.
+//
+// Convertir un UNKNOWN en un veredicto determinado es lo unico que puede crear un
+// error peligroso, asi que el filtro es estrecho a proposito: la MISMA frase debe
+// nombrar la condicion del articulo Y negar la devolucion, y ademas tiene que
+// pasar el mismo clauseSupportsVerdict que exigimos a cualquier otra cita.
+// "Unopened items may be returned" no entra: \bopened\b no casa dentro de
+// "Unopened", y aunque casara, no hay negacion.
+//
+// LIMITE CONOCIDO, escrito aqui para que no se descubra en produccion: esto no
+// entiende de CATEGORIAS. Una pagina que diga "opened cosmetics cannot be
+// returned" firmaria ese NO tambien para un portatil abierto. Lo que estrecha el
+// riesgo no es esta funcion sino donde se la llama: solo se llega aqui cuando la
+// cita del propio modelo era de ambito "nuevo/sellado", asi que la pagina ya
+// estaba hablando de esa condicion. No es imposible equivocarse, es improbable.
+// Si algun dia aparece un falso NO, el arreglo es acotar por categoria, no
+// ensanchar este filtro.
+const CONDITION_MENTION_RE =
+  /\b(?:opened|unsealed|activated|used|worn)\b|\bseal(?:s)? (?:is|are|has been|have been) broken\b|\bbroken seal\b/i;
+
+export function conditionExclusionClause(policyText, itemCondition) {
+  if (!policyText) return null;
+  if (itemCondition !== "opened" && itemCondition !== "used") return null;
+  for (const raw of splitSentences(policyText)) {
+    const s = raw.replace(/\s+/g, " ").trim();
+    if (s.length < 20) continue;
+    if (!CONDITION_MENTION_RE.test(s)) continue;
+    if (!NON_RETURN.test(s)) continue;
+    return s;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // W05 — FRASES CANDIDATAS.
 //
