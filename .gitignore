@@ -11,3 +11,7 @@ _local/
 
 # Parches de trabajo: se aplican con git am y se quedan en local.
 *.patch
+
+# Nunca versionar claves (van fuera del repo, en OneDrive/Documentos/returncheck-claves)
+claves.txt
+contraseñas/
