@@ -18,6 +18,19 @@ DATA_RETENTION_MONTHS = "48"                  # decision 25 ago 2026 (doc 40)
 #     pregunto que, no. "false" en ANSWER_LOG lo apaga sin desplegar.
 ANSWER_RETENTION_MONTHS = "12"
 ANSWER_LOG = "true"
+
+# --- W28: x402. APAGADO hasta que haya direccion de cobro y el flujo este probado
+#     en la red de pruebas. Mientras X402_ENABLED sea "false" no cambia nada.
+#     La direccion de cobro NO es un secreto: es publica por definicion, ahi es
+#     donde se ve el dinero entrar. Pero no hay ninguna clave privada en este
+#     proyecto: nosotros solo COBRAMOS, no firmamos ni movemos fondos.
+X402_ENABLED = "false"
+X402_NETWORK = "eip155:84532"                 # Base Sepolia (pruebas). Mainnet: eip155:8453
+X402_PAY_TO = ""                              # <- direccion de recepcion, pendiente
+X402_ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"   # USDC en Base Sepolia
+X402_ASSET_NAME = "USDC"
+X402_ASSET_VERSION = "2"
+X402_TIMEOUT_SECONDS = "60"
 # --- W05: muestreo del modelo. Editable en el panel SIN desplegar, para poder
 #     medir las dos ramas del experimento contra el MISMO build. "0.6" era el
 #     comportamiento anterior: el que Workers AI aplicaba solo, sin decidirlo nadie.
