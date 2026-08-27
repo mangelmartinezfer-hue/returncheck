@@ -61,6 +61,10 @@ X402_TIMEOUT_SECONDS = "60"
 # no significa que este decidido.
 X402_FACILITATOR = "https://v2.facilitator.mogami.tech"
 X402_TIMEOUT_MS = "8000"
+# W41 — liquidar espera confirmaciones de una cadena; verificar es solo una
+# consulta. Darles el mismo plazo nos costo un cobro sin entrega el 27 de agosto:
+# la liquidacion tardo 11 s, el plazo de 8 vencio, y el dinero llego igualmente.
+X402_SETTLE_TIMEOUT_MS = "25000"
 # Cuanto tiempo se recuerda un identificador de pago para no cobrar dos veces por
 # el mismo reintento. Mas largo que cualquier ventana de reintento razonable, y no
 # eterno.

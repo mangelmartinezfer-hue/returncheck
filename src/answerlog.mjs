@@ -166,12 +166,43 @@ export async function recordAnswer(env, { resp, req, apiKey, build, corpusId } =
 }
 
 /** Marca si la respuesta se cobró. Se llama tras el cobro. Nunca lanza. */
+/**
+ * W41 — `charged` admite TRES estados, no dos.
+ *
+ *   1     cobrado y confirmado
+ *   0     no se cobró, y lo sabemos
+ *   null  NO SABEMOS todavía — se lanzó la liquidación y no tenemos confirmación
+ *
+ * El tercero no es un adorno: el 27 de agosto una liquidación venció el plazo,
+ * la anotamos como `0`, y el dinero había llegado. Una fila que dice «no se
+ * cobró» cuando sí se cobró es peor que no tener fila, porque ante una queja la
+ * consultaríamos y contestaríamos que no. El esquema ya lo preveía —«NULL hasta
+ * que el cobro se resuelve»—; era esta función la que no sabía escribirlo.
+ *
+ * Y da la lista de conciliación, que antes no existía:
+ *   SELECT id FROM answer_log WHERE charged IS NULL AND price_usd > 0
+ */
 export async function markAnswerCharged(env, id, priceUsd, charged = true) {
   try {
     if (!env || !env.DB || !id) return;
+    const valor = charged === null ? null : (charged ? 1 : 0);
     await env.DB.prepare("UPDATE answer_log SET charged = ?, price_usd = ? WHERE id = ?")
-      .bind(charged ? 1 : 0, Number.isFinite(priceUsd) ? priceUsd : null, id).run();
+      .bind(valor, Number.isFinite(priceUsd) ? priceUsd : null, id).run();
   } catch (_) { /* nunca rompe */ }
+}
+
+/**
+ * Las respuestas cuyo cobro quedó sin resolver. Se concilian mirando la cadena:
+ * el dinero llegó o no llegó, y eso es comprobable.
+ */
+export async function pendingSettlements(env, limit = 100) {
+  try {
+    const r = await env.DB.prepare(
+      "SELECT id, answered_at, merchant_domain, verdict, price_usd FROM answer_log " +
+      "WHERE charged IS NULL AND price_usd > 0 ORDER BY answered_at DESC LIMIT ?"
+    ).bind(Number(limit) || 100).all();
+    return (r && r.results) || [];
+  } catch (_) { return []; }
 }
 
 /**

@@ -683,7 +683,7 @@ async function handleCheckX402(request, env) {
 
   // 6) Liquidar. UNKNOWN no se liquida: la autorizacion caduca sin usarse y no se
   //    mueve un centimo. Decision del 22 de agosto, y aqui sale gratis de aplicar.
-  let cabeceraPago = null, coste = 0, transaccion = null;
+  let cabeceraPago = null, coste = 0, transaccion = null, estadoLiquidacion = "not_charged";
   if (veredictoCobrable(resp.verdict, env)) {
     const liq = await liquidarPago(env, { pago: firma.pago, requisitos: aceptado });
     if (!liq.cobrado && !liq.pendiente) {
@@ -697,8 +697,13 @@ async function handleCheckX402(request, env) {
     coste = Number(precio);
     cabeceraPago = cabeceraLiquidacion({
       success: liq.cobrado, transaction: liq.transaccion, network: liq.red,
-      payer: liq.pagador, errorReason: liq.pendiente ? "settlement_pending" : null });
-    await markAnswerCharged(env, checkId, coste, true);
+      payer: liq.pagador, errorReason: liq.pendiente ? (liq.incierto ? "settlement_unconfirmed" : "settlement_pending") : null });
+    // W41 — TRES ESTADOS, no dos. Solo se marca cobrado lo CONFIRMADO; lo que
+    // está en vuelo o sin confirmar se deja en `null`, que es la verdad, y
+    // aparece en la lista de conciliación. Marcarlo `0` fue lo que hizo que el
+    // registro mintiera el 27 de agosto.
+    await markAnswerCharged(env, checkId, coste, liq.cobrado ? true : null);
+    estadoLiquidacion = liq.cobrado ? "confirmed" : (liq.incierto ? "unconfirmed" : "pending");
   } else {
     await markAnswerCharged(env, checkId, 0, false);
     cabeceraPago = cabeceraLiquidacion({
@@ -717,6 +722,10 @@ async function handleCheckX402(request, env) {
       "access-control-allow-origin": "*",
       "PAYMENT-RESPONSE": cabeceraPago,
       "X-ReturnCheck-Cost": coste.toFixed(4),
+      // W41 — que el cliente sepa en qué estado quedó su dinero sin tener que
+      // mirar la cadena. "unconfirmed" no significa que no haya pagado:
+      // significa que ni él ni nosotros lo sabemos todavía.
+      "X-ReturnCheck-Settlement": estadoLiquidacion,
     },
   });
 }

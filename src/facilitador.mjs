@@ -41,6 +41,21 @@
 
 const TIMEOUT_MS_POR_DEFECTO = 8000;
 
+// W41 — LIQUIDAR NO TARDA LO MISMO QUE VERIFICAR, y darles el mismo plazo nos
+// costó dinero de verdad.
+//
+// LO QUE PASÓ EL 27 DE AGOSTO, medido: la liquidación tardó más de 8 segundos.
+// Nuestro plazo venció, dimos el cobro por fallido, devolvimos un 402 y no
+// servimos la respuesta. Mientras tanto la transferencia SÍ se completó en la
+// cadena: 0,02 USDC salieron del comprador y llegaron a nuestra cuenta. El
+// registro quedó diciendo `charged: 0`. Cobramos, no entregamos, y apuntamos que
+// no habíamos cobrado.
+//
+// Verificar es una consulta y va rápido. Liquidar es una transacción en una
+// cadena de bloques y espera confirmaciones. Un solo número para las dos cosas
+// era el error.
+const TIMEOUT_LIQUIDAR_MS_POR_DEFECTO = 25000;
+
 /**
  * Llamada al facilitador. Aislada para poder probar todo el flujo sin red:
  * `fetchImpl` se inyecta en las pruebas.
@@ -49,7 +64,9 @@ async function llamar(env, ruta, cuerpo, { fetchImpl = fetch } = {}) {
   const base = String(env.X402_FACILITATOR || "").replace(/\/+$/, "");
   if (!base) return { ok: false, error: "no_facilitator_configured" };
 
-  const timeout = Number(env.X402_TIMEOUT_MS || TIMEOUT_MS_POR_DEFECTO);
+  const timeout = ruta === "/settle"
+    ? Number(env.X402_SETTLE_TIMEOUT_MS || TIMEOUT_LIQUIDAR_MS_POR_DEFECTO)
+    : Number(env.X402_TIMEOUT_MS || TIMEOUT_MS_POR_DEFECTO);
   try {
     const r = await fetchImpl(base + ruta, {
       method: "POST",
@@ -137,7 +154,34 @@ export async function verificarPago(env, { pago, requisitos }, opciones = {}) {
  */
 export async function liquidarPago(env, { pago, requisitos }, opciones = {}) {
   const r = await llamar(env, "/settle", cuerpoFacilitador(pago, requisitos, env), opciones);
-  if (!r.ok) return { cobrado: false, pendiente: false, transaccion: "", red: "", pagador: null, motivo: r.error };
+  if (!r.ok) {
+    // W41 — AQUÍ ESTABA EL FALLO QUE COSTÓ DINERO. Antes, cualquier error se
+    // trataba como «no se cobró». Pero en una liquidación no es lo mismo saber
+    // que el dinero NO se movió que no saber qué ha pasado:
+    //
+    //   NO SALIÓ   `unreachable`, sin facilitador configurado -> la petición no
+    //              llegó a irse. El dinero no se movió. Es un fallo de verdad.
+    //
+    //   NO SÉ      un plazo vencido o un error del servidor -> la petición SÍ
+    //              salió. El facilitador puede haber ejecutado la transferencia
+    //              y habérsenos perdido la respuesta. Es exactamente lo que pasó
+    //              el 27 de agosto: 0,02 USDC llegaron a nuestra cuenta mientras
+    //              nosotros dábamos el cobro por fallido.
+    //
+    // Y ante la duda se sirve, decisión de Miguel: cobrar sin entregar es mucho
+    // peor que entregar sin cobrar. Lo primero rompe la confianza del cliente y
+    // se publica; lo segundo cuesta céntimos.
+    //
+    // ESTO NO ABRE LA PUERTA A RESPUESTAS GRATIS, y conviene ver por qué: para
+    // llegar aquí hay que haber pasado antes por `verificarPago`, que sigue
+    // fallando cerrado. Un facilitador caído no llega nunca a la liquidación
+    // porque la verificación lo para antes, con el motor sin gastar.
+    const noSalio = r.error === "facilitator_unreachable" || r.error === "no_facilitator_configured";
+    if (noSalio)
+      return { cobrado: false, pendiente: false, transaccion: "", red: "", pagador: null, motivo: r.error };
+    return { cobrado: false, pendiente: true, incierto: true, transaccion: "", red: "",
+             pagador: null, motivo: "settlement_unconfirmed_" + r.error };
+  }
 
   const d = r.datos;
   const red = d.network || (requisitos && requisitos.network) || "";
@@ -151,6 +195,17 @@ export async function liquidarPago(env, { pago, requisitos }, opciones = {}) {
   if (d.errorReason === "settlement_pending" && d.transaction)
     return { cobrado: false, pendiente: true, transaccion: d.transaction, red, pagador, motivo: "settlement_pending" };
 
+  // W41 — «pendiente» SIN hash tampoco es un fallo: es otra forma de no saber.
+  // Antes lo tratábamos como fallo («un fallo con nombre bonito»), y esa lectura
+  // era coherente con la regla vieja. Con la regla nueva no lo es: si el
+  // facilitador dice que está en curso, puede estarlo de verdad aunque no nos
+  // haya dado el hash todavía. Se sirve y se marca para conciliar.
+  if (d.errorReason === "settlement_pending")
+    return { cobrado: false, pendiente: true, incierto: true, transaccion: "", red, pagador,
+             motivo: "settlement_pending_sin_hash" };
+
+  // Un motivo de negocio explícito SÍ es un fallo de verdad: el facilitador nos
+  // ha contestado y nos ha dicho que no. Ahí sabemos que el dinero no se movió.
   return { cobrado: false, pendiente: false, transaccion: d.transaction || "", red, pagador,
            motivo: d.errorReason || "settlement_failed" };
 }
