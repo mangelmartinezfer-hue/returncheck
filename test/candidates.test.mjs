@@ -154,7 +154,10 @@ test("motor: una cita PARAFRASEADA se rescata eligiendo la candidata", async () 
     evidence: { source_url: PETICION.product_url, exact_clause: "puedes devolver en 90 días", clause_id: idx },
   });
   const r = await runCheck(env, PETICION);
-  assert.equal(r.verdict, "YES_WITH_CONDITIONS");
+  // W23 — a esta prueba le da igual el SABOR del positivo: lo que vigila es
+  // otra cosa. Se comprueba que el veredicto sea positivo, para que un cambio
+  // de taxonomia no la rompa por algo de lo que no trata.
+  assert.ok(["YES", "YES_WITH_CONDITIONS"].includes(r.verdict), r.verdict);
   assert.equal(r.evidence.exact_clause, c[idx - 1]);
   assert.equal(r.meta.clause_from_candidate, true);
 });

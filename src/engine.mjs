@@ -4,7 +4,7 @@
 import puppeteer from "@cloudflare/puppeteer";
 import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL, inferenceParams } from "./prompt.mjs";
 import { checkInvariants } from "./contract.mjs";
-import { applyDeadline, missingInputFor, missingInputHint } from "./decision.mjs";
+import { applyDeadline, missingInputFor, missingInputHint, classifyPositive } from "./decision.mjs";
 import { todayDate, addDays, sha256hex, BUILD } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
   candidateClauses, candidateBlock, pickClause, usableAnswerHuman,
@@ -501,6 +501,15 @@ export async function assembleFromJsonLd(ld, req, html, meta, sourceUrl) {
 // terminada. Una sola funcion, y las tres vias del motor pasan por ella.
 async function closeOut(env, resp, req, { capture = null } = {}) {
   const final = applyDeadline(resp, req, req.as_of || todayDate());
+
+  // W23 — YES vs YES_WITH_CONDITIONS lo decide una regla determinista, no el
+  // modelo. Va DESPUES de applyDeadline: si la ventana vencio ya es NO y aqui no
+  // entra. Y va antes de missing_input, porque un YES limpio no pide nada.
+  const tax = classifyPositive(final, req);
+  if (tax) {
+    final.verdict = tax.verdict;
+    if (tax.assumed_satisfied.length) final.assumed_satisfied = tax.assumed_satisfied;
+  }
 
   // W21 — que un "no lo se" diga TAMBIEN que haria falta para saberlo. Aditivo:
   // si no falta nada, los campos no aparecen y nadie que ya integro nota el cambio.
