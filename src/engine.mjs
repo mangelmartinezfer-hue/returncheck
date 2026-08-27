@@ -535,6 +535,7 @@ async function closeOut(env, resp, req, { capture = null } = {}) {
   // respuesta ya cerrada, por la lección de W17: lo que se guarda tiene que ser
   // exactamente lo que dimos, no un estado intermedio. El id se devuelve al
   // cliente para que pueda citarlo en una reclamación.
+  // W22 — recordAnswer se salta sola las pasadas de examen (req.__no_corpus).
   const checkId = await recordAnswer(env, {
     resp: final, req, apiKey: req.__api_key, build: BUILD,
     corpusId: final.meta && final.meta.corpus_id,

@@ -195,3 +195,17 @@ test("W20: una respuesta servida de cache queda marcada como tal", async () => {
   assert.equal(DB._f[0].via, "cache");
   assert.equal(DB._f[0].cache_hit, 1);
 });
+
+test("W22 EL EXAMEN NO ENSUCIA EL REGISTRO: una pasada de /eval no deja ni una fila", async () => {
+  // Mismo criterio que W15 con el corpus. 43 respuestas sinteticas por pasada
+  // mezcladas con las reales convierten el registro de reclamaciones en un sitio
+  // donde hay que filtrar antes de mirar — y un archivo que hay que limpiar para
+  // usarlo deja de usarse.
+  const DB = db();
+  const id = await recordAnswer({ DB }, { resp: RESP, req: { ...REQ, __no_corpus: true }, build: "w22" });
+  assert.equal(id, null);
+  assert.equal(DB._f.length, 0);
+  // Y una consulta normal SI se registra: la proteccion no puede tragarse todo.
+  await recordAnswer({ DB }, { resp: RESP, req: REQ, build: "w22" });
+  assert.equal(DB._f.length, 1);
+});
