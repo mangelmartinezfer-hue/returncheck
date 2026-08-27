@@ -23,7 +23,7 @@ import { addWatch, removeWatch, listWatches, changesFor } from "./watch.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-27-w15-w16-avisos";
+const BUILD = "2026-08-27-w17-captura-al-final";
 
 // W09 — Autorizacion de administrador.
 //

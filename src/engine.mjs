@@ -478,6 +478,52 @@ export async function assembleFromJsonLd(ld, req, html, meta, sourceUrl) {
   };
 }
 
+// W17 — CERRAR LA RESPUESTA, y en el orden correcto.
+//
+// EL FALLO, visto en el primer ensayo real de los avisos (27 ago): el aviso salio
+// "text_only" con dias en null y categoria UnlimitedWindow, cuando las dos
+// llamadas habian devuelto FiniteReturnWindow y 60 -> 30 dias. El clasificador
+// estaba bien; se le entregaban datos vacios.
+//
+// La causa es de ORDEN, no de logica. `applyDeadline` no es un adorno final: es
+// donde la categoria se reconcilia con la cita, donde se rellena el plazo leyendo
+// la clausula, y donde un veredicto positivo se convierte en NO si la ventana ya
+// venció. Se estaba capturando el corpus ANTES de todo eso, asi que se guardaba
+// la salida cruda del modelo en vez de la respuesta que de verdad damos.
+//
+// Y arrastraba un segundo fallo mas viejo y mas feo: `recordCheck` tambien corria
+// antes, o sea que nuestras propias metricas llevan desde siempre contando el
+// veredicto PREVIO. Cada caso de "plazo vencido" se apuntaba con su veredicto
+// positivo y no como NO. Los numeros del panel estaban sesgados y nadie lo vio.
+//
+// Regla que deja esto cerrado: NADA se registra hasta que la respuesta esta
+// terminada. Una sola funcion, y las tres vias del motor pasan por ella.
+async function closeOut(env, resp, req, { capture = null } = {}) {
+  const final = applyDeadline(resp, req, req.as_of || todayDate());
+
+  if (capture && !req.__no_corpus) {
+    const corpusId = await capturePolicy(env, {
+      ...capture,
+      merchantName: final.merchant_resolved && final.merchant_resolved.name,
+      country: final.merchant_resolved && final.merchant_resolved.country,
+      apiKey: req.__api_key,
+      scope: { seller: req.seller_name || null, channel: req.purchase_channel || null, membership: req.membership || null },
+      // Lo que de verdad respondimos, ya reconciliado. Es lo que permite decir
+      // "paso de 60 a 30 dias" en vez de "algo cambio".
+      parsed: final.policy
+        ? { days: final.policy.merchant_return_days ?? null, category: final.policy.return_category || null }
+        : null,
+    });
+    if (corpusId) {
+      final.meta = { ...final.meta, corpus_id: corpusId };
+      await recordCorpusUse(env, corpusId, final.verdict);
+    }
+  }
+
+  await recordCheck(env, final);
+  return final;
+}
+
 // Punto de entrada. Devuelve la respuesta del contrato (verdict UNKNOWN incluido).
 export async function runCheck(env, req) {
   const t0 = Date.now();
@@ -496,8 +542,8 @@ export async function runCheck(env, req) {
     if (cached && cached.expires_at > todayDate()) {
       const resp = JSON.parse(cached.payload);
       resp.meta = { cache_hit: true, response_ms: Date.now() - t0, checked_via: "cache" };
-      await recordCheck(env, resp);
-      return applyDeadline(resp, req, req.as_of || todayDate());
+      // Acierto de cache: no se recaptura (ya esta en el corpus de la primera vez).
+      return await closeOut(env, resp, req);
     }
   }
 
@@ -527,8 +573,9 @@ export async function runCheck(env, req) {
         "INSERT OR REPLACE INTO policy_cache (cache_key, payload, verified_on, expires_at) VALUES (?,?,?,?)"
       ).bind(key, JSON.stringify(toCacheLd), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
     }
-    await recordCheck(env, built);
-    return applyDeadline(built, req, req.as_of || todayDate());
+    return await closeOut(env, built, req, {
+      capture: { policyText: html, sourceUrl, via: checked_via },
+    });
   };
 
   // 3a) Datos estructurados en la página (fundamentado, sin IA).
@@ -583,25 +630,6 @@ export async function runCheck(env, req) {
   if (discovered_url) meta.discovered_policy_url = discovered_url;
   const resp = await assemble(ai, req, policyText, meta, sourceUrl);
 
-  // W14 — LA PUERTA. Se guarda la politica que acabamos de leer, ANTES de que
-  // llegue el trafico y no despues. Nunca rompe la consulta: si falla, devuelve
-  // null y el cliente no se entera. Ver src/corpus.mjs para el porque.
-  const corpusId = req.__no_corpus ? null : await capturePolicy(env, {
-    policyText, sourceUrl, via: checked_via,
-    merchantName: resp.merchant_resolved && resp.merchant_resolved.name,
-    country: resp.merchant_resolved && resp.merchant_resolved.country,
-    apiKey: req.__api_key,
-    scope: { seller: req.seller_name || null, channel: req.purchase_channel || null, membership: req.membership || null },
-    // W16 — lo que acabamos de extraer viaja con la captura: es lo que permite
-    // decir EN QUE cambio una politica, no solo QUE cambio.
-    parsed: resp.policy
-      ? { days: resp.policy.merchant_return_days ?? null, category: resp.policy.return_category || null }
-      : null,
-  });
-  if (corpusId) {
-    resp.meta = { ...resp.meta, corpus_id: corpusId };
-    await recordCorpusUse(env, corpusId, resp.verdict);
-  }
   const inv = checkInvariants(resp);
   if (!inv.ok) {
     // Nunca reventamos: si el resultado no es válido, degradamos a UNKNOWN honesto.
@@ -620,8 +648,10 @@ export async function runCheck(env, req) {
     ).bind(key, JSON.stringify(toCache), todayDate(), addDays(todayDate(), ttlDays)).run().catch(() => {});
   }
 
-  await recordCheck(env, resp);
-  return applyDeadline(resp, req, req.as_of || todayDate());
+  // W14 — LA PUERTA. La captura va DESPUES de cerrar la respuesta (ver closeOut).
+  return await closeOut(env, resp, req, {
+    capture: { policyText, sourceUrl, via: checked_via },
+  });
 }
 
 export { EngineError };
