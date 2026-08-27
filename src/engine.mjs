@@ -515,13 +515,15 @@ export async function assembleFromJsonLd(ld, req, html, meta, sourceUrl) {
 //
 // Regla que deja esto cerrado: NADA se registra hasta que la respuesta esta
 // terminada. Una sola funcion, y las tres vias del motor pasan por ella.
-async function closeOut(env, resp, req, { capture = null } = {}) {
+async function closeOut(env, resp, req, { capture = null, policyText: textoPolitica = null } = {}) {
   const final = applyDeadline(resp, req, req.as_of || todayDate());
 
   // W23 — YES vs YES_WITH_CONDITIONS lo decide una regla determinista, no el
   // modelo. Va DESPUES de applyDeadline: si la ventana vencio ya es NO y aqui no
   // entra. Y va antes de missing_input, porque un YES limpio no pide nada.
-  const tax = classifyPositive(final, req);
+  // W25 — el texto COMPLETO, no solo la cita: una condicion de resultado casi
+  // nunca vive en la misma frase que el permiso.
+  const tax = classifyPositive(final, req, textoPolitica);
   if (tax) {
     final.verdict = tax.verdict;
     if (tax.assumed_satisfied.length) final.assumed_satisfied = tax.assumed_satisfied;
@@ -621,6 +623,7 @@ export async function runCheck(env, req) {
     }
     return await closeOut(env, built, req, {
       capture: { policyText: html, sourceUrl, via: checked_via },
+      policyText: html,
     });
   };
 
@@ -697,6 +700,7 @@ export async function runCheck(env, req) {
   // W14 — LA PUERTA. La captura va DESPUES de cerrar la respuesta (ver closeOut).
   return await closeOut(env, resp, req, {
     capture: { policyText, sourceUrl, via: checked_via },
+    policyText,
   });
 }
 
