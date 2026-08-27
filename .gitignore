@@ -15,3 +15,6 @@ _local/
 # Nunca versionar claves (van fuera del repo, en OneDrive/Documentos/returncheck-claves)
 claves.txt
 contraseñas/
+
+returncheck-pruebas/
+comprador.txt
