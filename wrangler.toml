@@ -43,6 +43,13 @@ X402_ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"   # USDC en Base Sepol
 X402_ASSET_NAME = "USDC"
 X402_ASSET_VERSION = "2"
 X402_TIMEOUT_SECONDS = "60"
+# El FACILITADOR es quien nos dice si un pago es real. Eleccion pendiente para
+# mainnet: es una decision de CONFIANZA, no tecnica — un facilitador que mintiera
+# diciendo "pagado" nos haria regalar respuestas. Para la red de pruebas da igual,
+# el dinero es de mentira. Sin esto configurado, x402 no cobra ni sirve: falla
+# cerrado a proposito.
+X402_FACILITATOR = ""
+X402_TIMEOUT_MS = "8000"
 # --- W05: muestreo del modelo. Editable en el panel SIN desplegar, para poder
 #     medir las dos ramas del experimento contra el MISMO build. "0.6" era el
 #     comportamiento anterior: el que Workers AI aplicaba solo, sin decidirlo nadie.
