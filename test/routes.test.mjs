@@ -148,3 +148,85 @@ test("W09: sin ADMIN_KEY configurada no se abre por ninguna de las dos vías", a
   assert.equal(r1.status, 404);
   assert.equal(r2.status, 404);
 });
+
+// ---------------------------------------------------------------------------
+// W32 — x402 cosido a la ruta.
+//
+// Lo que vigilan estas pruebas es lo que de verdad da miedo de este cambio: que
+// tocar la ruta de cobro rompa algo que hoy funciona. Por eso la primera y la
+// última comprueban que CON EL INTERRUPTOR APAGADO no cambia absolutamente nada.
+// ---------------------------------------------------------------------------
+
+import { sacarDelSobre } from "../src/x402.mjs";
+
+const ENV_X402 = {
+  ...ENV,
+  X402_ENABLED: "true",
+  X402_NETWORK: "eip155:84532",
+  X402_PAY_TO: "0xbF428071027402E9b0cE85e22146EDdc028cEB3b",
+  X402_ASSET: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  // Sin tramo gratis, para llegar al 402 sin depender de la base de datos.
+  FREE_TRIAL_ENABLED: "false",
+};
+
+const postCheck = (env, cabeceras = {}) =>
+  worker.fetch(new Request("https://rc.example/v1/check", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...cabeceras },
+    body: JSON.stringify({ product_url: "https://tienda.example/p/1", buyer_country: "US" }),
+  }), env);
+
+test("W32 LO MAS IMPORTANTE: con el interruptor APAGADO no cambia nada", async () => {
+  // Ni siquiera mandando una firma de pago. Si esto fallara, habriamos cambiado el
+  // comportamiento de produccion al desplegar, que es justo lo que no queremos.
+  const r = await postCheck({ ...ENV, FREE_TRIAL_ENABLED: "false" },
+                            { "PAYMENT-SIGNATURE": "cualquier-cosa" });
+  assert.equal(r.headers.get("PAYMENT-REQUIRED"), null);
+  assert.equal(r.status, 402);   // el 402 educado de siempre
+});
+
+test("W32: el callejón sin salida pasa a ser una puerta", async () => {
+  // Antes, agotado el tramo gratis, el 402 decia "no puedes seguir". Ahora dice
+  // cuanto cuesta y donde pagar.
+  const r = await postCheck(ENV_X402);
+  assert.equal(r.status, 402);
+  const sobre = r.headers.get("PAYMENT-REQUIRED");
+  assert.ok(sobre, "falta la cabecera PAYMENT-REQUIRED");
+  const reto = sacarDelSobre(sobre);
+  assert.equal(reto.x402Version, 2);
+  assert.equal(reto.accepts[0].amount, "20000");
+  assert.equal(reto.accepts[0].payTo, "0xbF428071027402E9b0cE85e22146EDdc028cEB3b");
+  assert.equal(reto.accepts[0].network, "eip155:84532");
+});
+
+test("W32: el cuerpo del 402 lleva el mismo reto que la cabecera", async () => {
+  // Un agente que no sepa leer la cabecera todavia puede entenderlo.
+  const r = await postCheck(ENV_X402);
+  const cuerpo = await r.json();
+  assert.equal(cuerpo.x402Version, 2);
+  assert.equal(cuerpo.accepts[0].payTo, sacarDelSobre(r.headers.get("PAYMENT-REQUIRED")).accepts[0].payTo);
+});
+
+test("W32: una firma que no cuadra con lo que pedimos NO pasa", async () => {
+  // El ataque de W28, ahora por la ruta de verdad: firma perfecta sobre una
+  // cantidad rebajada. Ni siquiera se llega a llamar al facilitador.
+  const { meterEnSobre } = await import("../src/x402.mjs");
+  const trucada = meterEnSobre({
+    x402Version: 2,
+    accepted: { scheme: "exact", network: "eip155:84532", amount: "1",
+                asset: "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+                payTo: "0xbF428071027402E9b0cE85e22146EDdc028cEB3b" },
+    payload: { signature: "0xloquesea", authorization: {} },
+  });
+  const r = await postCheck(ENV_X402, { "PAYMENT-SIGNATURE": trucada });
+  assert.equal(r.status, 402);
+  const reto = sacarDelSobre(r.headers.get("PAYMENT-REQUIRED"));
+  assert.match(reto.error, /do not match/);
+});
+
+test("W32: sin dirección de cobro configurada, no se anuncia precio", async () => {
+  // Preferimos el 402 educado de siempre a un reto de pago sin decir a donde.
+  const r = await postCheck({ ...ENV_X402, X402_PAY_TO: "" });
+  assert.equal(r.status, 402);
+  assert.equal(r.headers.get("PAYMENT-REQUIRED"), null);
+});
