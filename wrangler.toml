@@ -48,7 +48,18 @@ X402_TIMEOUT_SECONDS = "60"
 # diciendo "pagado" nos haria regalar respuestas. Para la red de pruebas da igual,
 # el dinero es de mentira. Sin esto configurado, x402 no cobra ni sirve: falla
 # cerrado a proposito.
-X402_FACILITATOR = ""
+# Mogami v2. Comprobado el 28 ago 2026 contra su propio /supported, no contra su
+# web: declara x402Version 2, esquema "exact", y las dos redes que nos importan
+# (eip155:84532 Sepolia y eip155:8453 mainnet). Sin cuenta, sin clave, sin comision.
+#
+# Se eligio frente al de x402.org por un motivo concreto: Mogami declara la version
+# en la URL (v2. frente a v1.). Nosotros somos estrictamente v2 y esa ambiguedad es
+# la clase de detalle que quema una tarde.
+#
+# PARA MAINNET SIGUE SIENDO UNA DECISION DE CONFIANZA, no tecnica: un facilitador
+# que mintiera diciendo "pagado" nos haria regalar respuestas. Que valga tecnicamente
+# no significa que este decidido.
+X402_FACILITATOR = "https://v2.facilitator.mogami.tech"
 X402_TIMEOUT_MS = "8000"
 # Cuanto tiempo se recuerda un identificador de pago para no cobrar dos veces por
 # el mismo reintento. Mas largo que cualquier ventana de reintento razonable, y no
