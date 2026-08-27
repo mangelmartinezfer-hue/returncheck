@@ -272,3 +272,62 @@ test("W15: una consulta normal SÍ sigue capturando", async () => {
   assert.equal(DB._filas[0].merchant_domain, "shop.example.com");
   assert.equal(r.meta.corpus_id, DB._filas[0].id);
 });
+
+// ---------- W17: el orden, que era el fallo real ----------
+//
+// El primer ensayo de los avisos en producción (27 ago) sacó "text_only" con días
+// en null, cuando las dos llamadas habían devuelto FiniteReturnWindow y 60 -> 30.
+// El clasificador estaba bien; se le daban datos vacíos, porque el corpus se
+// capturaba ANTES de applyDeadline — que es donde la categoría se reconcilia, el
+// plazo se lee de la cláusula, y un veredicto positivo pasa a NO si la ventana
+// venció.
+//
+// Estas pruebas fijan la regla: nada se registra hasta que la respuesta está
+// terminada.
+
+test("W17 EL FALLO: el corpus guarda la categoría y el plazo YA reconciliados", async () => {
+  const DB = dbFalsa();
+  const poliza = "Return Policy. Items may be returned within 60 days of delivery for a full refund.";
+  const ia = {
+    verdict: "YES_WITH_CONDITIONS", confidence: 0.9,
+    answer_human: "Yes, within 60 days.", reason: null,
+    merchant_resolved: { name: "Shop", domain: "shop.example.com", is_marketplace_third_party: false },
+    // El modelo NO rellena ni los días ni la categoría. applyDeadline los deriva
+    // de la cláusula. Antes de W17 el corpus se quedaba con estos huecos.
+    policy: { return_category: null, merchant_return_days: null, window_basis: null,
+              return_method: [], return_fees: null, refund_type: null },
+    evidence: { source_url: "https://shop.example.com/p/x", clause_id: null,
+                exact_clause: "Items may be returned within 60 days of delivery for a full refund." },
+  };
+  const env = { DB, AI: { run: async () => ({ response: JSON.stringify(ia) }) } };
+  const r = await runCheck(env, { product_url: "https://shop.example.com/p/x", buyer_country: "US",
+    item_condition: "unopened", delivery_date: "2026-08-20", as_of: "2026-08-25", page_text: poliza });
+
+  assert.equal(DB._filas.length, 1);
+  assert.equal(DB._filas[0].parsed_days, 60, "el plazo tiene que salir de la cláusula, no del modelo");
+  assert.equal(DB._filas[0].parsed_category, "FiniteReturnWindow");
+  assert.equal(r.policy.merchant_return_days, 60);
+});
+
+test("W17 LO GRAVE: un plazo vencido se guarda como NO, que es lo que respondimos", async () => {
+  // applyDeadline convierte el veredicto en NO cuando la ventana ya pasó. Capturar
+  // antes significaba guardar en el corpus un veredicto que el cliente nunca vio.
+  const DB = dbFalsa();
+  const poliza = "Return Policy. Items may be returned within 30 days of delivery for a full refund.";
+  const ia = {
+    verdict: "YES_WITH_CONDITIONS", confidence: 0.9,
+    answer_human: "Yes, within 30 days.", reason: null,
+    merchant_resolved: { name: "Shop", domain: "shop.example.com", is_marketplace_third_party: false },
+    policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, window_basis: "delivery_date",
+              return_method: [], return_fees: null, refund_type: "FullRefund" },
+    evidence: { source_url: "https://shop.example.com/p/y", clause_id: null,
+                exact_clause: "Items may be returned within 30 days of delivery for a full refund." },
+  };
+  const env = { DB, AI: { run: async () => ({ response: JSON.stringify(ia) }) } };
+  const r = await runCheck(env, { product_url: "https://shop.example.com/p/y", buyer_country: "US",
+    item_condition: "unopened", delivery_date: "2026-01-01", as_of: "2026-08-25", page_text: poliza });
+
+  assert.equal(r.verdict, "NO", "la ventana venció hace meses");
+  assert.equal(DB._usos.length, 1);
+  assert.equal(DB._usos[0].verdict, "NO", "el corpus tiene que registrar el veredicto FINAL");
+});
