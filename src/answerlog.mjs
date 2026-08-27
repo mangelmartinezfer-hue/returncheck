@@ -113,7 +113,11 @@ export async function recordAnswer(env, { resp, req, apiKey, build, corpusId } =
     ).bind(
       id, ahora, build || null, (env.AI_MODEL || "default-8b-fast"),
       apiKey ? await sha256full(apiKey) : null,
-      resp.checked_via || null,
+      // W20 — vive en resp.meta.checked_via, no en la raiz. Lo lei mal en W19 y la
+      // columna salia siempre vacia: el registro no sabia si una respuesta venia
+      // de la cache, del JSON-LD o del modelo, que es justo lo que decide si se
+      // puede reproducir igual.
+      (resp.meta && resp.meta.checked_via) || null,
       resp.meta && resp.meta.cache_hit ? 1 : 0,
 
       corpusId || (resp.meta && resp.meta.corpus_id) || null,

@@ -39,17 +39,43 @@ import { inferenceParams } from "./prompt.mjs";
 // Se conserva ?k= porque el panel /dashboard se abre pegando la URL en el
 // navegador y romperlo hoy no arregla nada. Queda dicho en el README lo que falta:
 // el panel sigue dejando rastro, y cerrarlo del todo pide sesion con cookie.
+// W20 — DOS PUERTAS, NO UNA.
+//
+// El problema: la clave de administrador se aceptaba tambien como parametro de
+// URL (?k=...), y una clave en la URL acaba escrita en los registros de
+// Cloudflare, en el historial del navegador y en cualquier cabecera Referer que
+// salga de esa pagina. La regla de la casa es cabecera y solo cabecera.
+//
+// Por que no bastaba con quitar el parametro: /dashboard y /demo son paginas que
+// se abren en un navegador, y desde la barra de direcciones no se pueden poner
+// cabeceras. Quitarlo a secas habria roto el panel.
+//
+// La solucion es separar las dos cosas:
+//  · adminOk        -> las rutas de maquina (/admin/*, /eval, /stats). SOLO cabecera.
+//  · pageAuthOk     -> las paginas de navegador. Acepta ?k=, pero contra
+//                      DASHBOARD_KEY si existe, para que la ADMIN_KEY —la que
+//                      borra datos— no tenga que viajar nunca por una URL.
+//
+// Pon DASHBOARD_KEY como secreto en el panel y la ADMIN_KEY deja de aparecer en
+// ningun registro. Mientras no lo pongas, sigue funcionando como antes.
 function adminOk(request, url, env) {
   if (!env.ADMIN_KEY) return false;
   const header = bearer(request);
-  if (header && header === env.ADMIN_KEY) return true;
-  return url.searchParams.get("k") === env.ADMIN_KEY;
+  return !!header && header === env.ADMIN_KEY;
+}
+
+function pageAuthOk(request, url, env) {
+  const header = bearer(request);
+  if (env.ADMIN_KEY && header && header === env.ADMIN_KEY) return true;
+  const dePagina = env.DASHBOARD_KEY || env.ADMIN_KEY;
+  if (!dePagina) return false;
+  return url.searchParams.get("k") === dePagina;
 }
 
 // Examen ciego v2: pasa el banco de casos por el motor de PRODUCCIÓN (vía agent_supplied)
 // y puntúa precisión, cobertura, trampas de honestidad y alucinaciones. Admin-gated.
 async function handleEval(request, env, url) {
-  if (!adminOk(request, url, env))
+  if (!pageAuthOk(request, url, env))
     return errorResponse("INVALID_INPUT", "Not found.", 404);
   // W06 — ?set=holdout corre el banco de 25 que NO escribimos nosotros. Por
   // defecto sigue siendo el de 18, para no romper ninguna comparacion anterior.
@@ -490,7 +516,7 @@ function openapi(env) {
 
 // ---- Panel de control: métricas reales del proyecto ----
 async function handleStats(request, env, url) {
-  if (!adminOk(request, url, env))
+  if (!pageAuthOk(request, url, env))
     return errorResponse("INVALID_INPUT", "Not found.", 404);
 
   const price = Number(env.PRICE_USD || "0.02");
