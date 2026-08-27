@@ -26,8 +26,20 @@ ANSWER_LOG = "true"
 #     proyecto: nosotros solo COBRAMOS, no firmamos ni movemos fondos.
 X402_ENABLED = "false"
 X402_NETWORK = "eip155:84532"                 # Base Sepolia (pruebas). Mainnet: eip155:8453
-X402_PAY_TO = ""                              # <- direccion de recepcion, pendiente
+# La direccion de recepcion. Es PUBLICA por definicion: viaja en el reto de pago y
+# cualquiera puede ver su saldo y su historial en Basescan. Por eso es una cuenta
+# aparte, solo de ReturnCheck, y no la personal de Miguel.
+# Checksum EIP-55 verificado el 28 ago 2026. Una letra cambiada da una direccion
+# valida en apariencia y el dinero no vuelve.
+# VA AQUI Y NO SOLO EN EL PANEL: las variables de wrangler.toml pisan las del panel
+# en cada despliegue. Si viviera solo en el panel, el proximo deploy la vaciaria y
+# el servicio dejaria de anunciar precio sin que nadie se entere.
+X402_PAY_TO = "0xbF428071027402E9b0cE85e22146EDdc028cEB3b"
 X402_ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"   # USDC en Base Sepolia
+# AL PASAR A MAINNET: hay que cambiar X402_NETWORK a eip155:8453 y X402_ASSET al
+# USDC oficial de Base mainnet. Esa direccion NO se pone de memoria: se verifica
+# contra la fuente oficial de Circle o de Base antes de tocarla. Un token
+# equivocado aqui es cobrar en una moneda que no existe.
 X402_ASSET_NAME = "USDC"
 X402_ASSET_VERSION = "2"
 X402_TIMEOUT_SECONDS = "60"

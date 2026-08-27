@@ -198,6 +198,17 @@ test("sin cabecera, con basura, o con versión vieja: se rechaza con motivo", ()
 // La liquidación
 // ---------------------------------------------------------------------------
 
+test("W29 LA DIRECCION REAL: el reto anuncia la cuenta de cobro de ReturnCheck", () => {
+  // La dirección de produccion, con su checksum EIP-55 comprobado. Si alguien la
+  // cambia por accidente, esta prueba lo dice antes de que el dinero se vaya a
+  // ninguna parte.
+  const PRODUCCION = "0xbF428071027402E9b0cE85e22146EDdc028cEB3b";
+  const reto = retoDePago({ ...ENV, X402_PAY_TO: PRODUCCION }, { url: "https://x/v1/check" });
+  assert.equal(reto.accepts[0].payTo, PRODUCCION);
+  // 0x + 40 caracteres hexadecimales. Ni uno mas ni uno menos.
+  assert.match(PRODUCCION, /^0x[0-9a-fA-F]{40}$/);
+});
+
 test("cabecera de liquidación: éxito y fracaso, con la forma de la especificación", () => {
   const ok = sacarDelSobre(cabeceraLiquidacion({
     success: true, transaction: "0xabc", network: RED.BASE_SEPOLIA, payer: "0x857b",
