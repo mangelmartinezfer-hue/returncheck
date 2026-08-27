@@ -23,11 +23,33 @@ test("W06 EL NÚMERO QUE HAY QUE TENER DELANTE: el techo de cobertura es 80,0 %"
   assert.equal(Math.round(((25 - unknowns) / 25) * 1000) / 10, 80);
 });
 
-test("W06: el holdout distingue YES de YES_WITH_CONDITIONS — el banco propio no", () => {
-  // Es la diferencia que obliga a puntuar dos veces. Si se olvidara, una
-  // discrepancia de ETIQUETA se contaría como error PELIGROSO.
+test("W27: los DOS bancos distinguen ya YES de YES_WITH_CONDITIONS", () => {
+  // Esta prueba afirmaba lo contrario hasta hoy: que el holdout distinguia y
+  // nuestro banco NO. Esa asimetria era la que hacia falta puntuar dos veces, y
+  // era el sintoma de que nuestra definicion de YES estaba muerta — en 250
+  // evaluaciones el motor no habia emitido ni uno.
+  //
+  // W27 recalibro tres casos (C01, C04, C13) siguiendo al holdout, no a nuestro
+  // codigo. La justificacion caso por caso esta escrita en src/eval-cases.mjs.
   assert.ok(HOLDOUT_CASES.some((c) => c.expected.verdict === "YES"));
-  assert.ok(!EVAL_CASES.some((c) => c.expected.verdict === "YES"));
+  assert.ok(EVAL_CASES.some((c) => c.expected.verdict === "YES"));
+});
+
+test("W27 LO QUE NO PUEDE PASAR: el banco propio NO se ha vuelto todo YES", () => {
+  // Si todos los positivos fueran YES, habriamos matado la etiqueta por el otro
+  // lado y el examen dejaria de discriminar. Cinco casos siguen esperando
+  // YES_WITH_CONDITIONS a proposito: C07, C08, C10, C16 y C17.
+  const ywc = EVAL_CASES.filter((c) => c.expected.verdict === "YES_WITH_CONDITIONS");
+  assert.equal(ywc.length, 5);
+  const yes = EVAL_CASES.filter((c) => c.expected.verdict === "YES");
+  assert.equal(yes.length, 3);
+});
+
+test("W27: cada respuesta recalibrada lleva su justificacion escrita", () => {
+  // Cambiar el examen sin dejar por escrito POR QUE es como se acaba aprobando
+  // sin saber la asignatura. Si algun dia falta la justificacion, se revierte.
+  for (const c of EVAL_CASES.filter((x) => x.expected.verdict === "YES"))
+    assert.match(c.note || "", /W27/, c.id + " recalibrado sin justificacion");
 });
 
 test("W06: cada caso trae la fecha de referencia y una cita esperada", () => {

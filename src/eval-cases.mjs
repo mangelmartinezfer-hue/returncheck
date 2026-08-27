@@ -1,3 +1,29 @@
+// W27 — RECALIBRACIÓN DE TRES RESPUESTAS ESPERADAS (27 ago 2026, decide Miguel).
+//
+// AVISO, y va primero porque es lo que hay que vigilar: cambiar las respuestas
+// esperadas del propio examen para que encajen con el código nuevo es EXACTAMENTE
+// como un equipo se engaña a sí mismo. Si algún día alguien lee esto y no
+// encuentra la justificación de abajo, que lo revierta.
+//
+// Lo que lo hace legítimo esta vez, y solo esta vez:
+//
+//  1. NO seguimos a nuestro código. Seguimos al HOLDOUT, que escribió el equipo de
+//     ChatGPT sin conocer nuestra taxonomía y que espera YES en 4 de sus 25 casos.
+//     El árbitro dijo primero cuál era la definición correcta.
+//  2. El holdout lo confirmó DESPUÉS de forma independiente: tras W26 su
+//     `taxonomy_only_diffs` es 0. No queda ni un caso donde discrepemos solo en
+//     YES contra YES_WITH_CONDITIONS. Con 25 casos ajenos de acuerdo, mantener
+//     nuestros tres en la definición vieja sería medir con dos varas.
+//  3. Ninguno de los tres cambia de POSITIVO a NEGATIVO ni al revés. Solo cambia
+//     la etiqueta dentro de lo positivo. Cero riesgo de sí falso.
+//  4. Los otros CINCO casos que esperan YES_WITH_CONDITIONS se quedan como están
+//     —C07, C08, C10, C16, C17— y por eso el campo sigue significando algo.
+//
+// La definición contra la que se justifica cada cambio:
+//   YES = la cláusula permite la devolución, la ventana está abierta, y toda
+//         condición que la cláusula NOMBRA está cubierta por lo que nos han dicho.
+//   YWC = queda al menos una condición que no podemos dar por cumplida.
+//
 // Banco CIEGO para el examen v2. Casos NUEVOS (comercios ficticios y textos de política
 // realistas con ruido), con veredicto esperado verificado a mano. Se pasan al motor de
 // PRODUCCIÓN por la vía agent_supplied (page_text) para medir precisión, cobertura y
@@ -12,8 +38,17 @@ export const EVAL_CASES = [
     id: "C01_finite_30",
     request: { buyer_country: "US", item_condition: "unopened", reason: "changed_mind" },
     page_text: "Returns & Refunds. We want you to love your purchase. Eligible items may be returned within 30 days of delivery for a full refund to the original payment method. Items must be unused and in their original packaging. Free standard shipping on orders over $50.",
-    expected: { verdict: "YES_WITH_CONDITIONS", days: 30 },
-    note: "Ventana clara de 30 días.",
+    // W27 · antes YES_WITH_CONDITIONS. Lo que la cláusula exige —"unused" y
+    // "original packaging"— son las dos condiciones de estado físico, y el
+    // artículo viene declarado `unopened`, que las entraña. El resultado no se
+    // toca: reembolso completo al método de pago original. No queda nada
+    // pendiente que dependa del comprador.
+    // El punto débil, dicho para que se pueda discutir: "Eligible items". Se
+    // trata como fórmula genérica y no como exclusión nombrada; si valiera como
+    // exclusión, casi toda política de internet sería condicional y la etiqueta
+    // volvería a no informar de nada.
+    expected: { verdict: "YES", days: 30 },
+    note: "Ventana clara de 30 días. Condiciones de estado cubiertas por unopened (W27).",
   },
   {
     id: "C02_final_sale_NO",
@@ -34,8 +69,13 @@ export const EVAL_CASES = [
     id: "C04_unlimited",
     request: { buyer_country: "US", item_condition: "used", reason: "changed_mind" },
     page_text: "Our Guarantee. We stand behind everything we sell. If you are not satisfied with your purchase for any reason, you may return it at any time for a full refund or replacement. There is no time limit on returns of general merchandise.",
-    expected: { verdict: "YES_WITH_CONDITIONS" },
-    note: "Ventana ilimitada (UnlimitedWindow).",
+    // W27 · antes YES_WITH_CONDITIONS. Es el caso más limpio de los tres: la
+    // cláusula NO nombra ni una sola condición. "Por cualquier motivo", "en
+    // cualquier momento", "sin límite de tiempo". Que el artículo esté usado da
+    // igual porque la política no condiciona nada al estado. Devolver
+    // YES_WITH_CONDITIONS aquí era decir "hay condiciones" cuando no las hay.
+    expected: { verdict: "YES" },
+    note: "Ventana ilimitada y sin condiciones nombradas (W27).",
   },
   {
     id: "C05_expired_window_NO",
@@ -100,8 +140,13 @@ export const EVAL_CASES = [
     id: "C13_late_delivery_ok",
     request: { buyer_country: "US", item_condition: "unopened", reason: "arrived_late", purchase_date: "2026-08-10", delivery_date: "2026-08-18" },
     page_text: "Returns. You may return unused items within 30 days of the delivery date for a full refund. Original shipping charges are non-refundable unless the item was defective.",
-    expected: { verdict: "YES_WITH_CONDITIONS", days: 30 },
-    note: "Dentro de ventana desde entrega (18-ago).",
+    // W27 · antes YES_WITH_CONDITIONS. Única condición nombrada: "unused",
+    // entrañada por `unopened`. Los gastos de envío originales no reembolsables
+    // NO cuentan como condición de resultado: no cambian lo que el comprador
+    // recibe POR EL ARTÍCULO, y el envío no se devuelve casi en ningún sitio.
+    // Hay una prueba dedicada a ese límite en test/taxonomia.test.mjs.
+    expected: { verdict: "YES", days: 30 },
+    note: "Dentro de ventana desde entrega (18-ago). Sin condiciones pendientes (W27).",
   },
   {
     id: "C14_custom_final_NO",
