@@ -173,3 +173,25 @@ test("busqueda: se puede llegar por el check_id que cita el cliente", async () =
   assert.equal(r.count, 1);
   assert.equal(r.answers[0].verdict, "NO");
 });
+
+// ---------------------------------------------------------------------------
+// W20 — dos puertas que estaban mal cerradas.
+// ---------------------------------------------------------------------------
+
+test("W20 EL FALLO DE W19: la via se lee de resp.meta, no de la raiz", async () => {
+  // Sin esto la columna salia siempre vacia y el registro no sabia si una
+  // respuesta venia de la cache, del JSON-LD o del modelo — que es justo lo que
+  // decide si se puede reproducir igual.
+  const DB = db();
+  const resp = { ...RESP, meta: { corpus_id: "corp-1", checked_via: "agent_supplied", cache_hit: false } };
+  await recordAnswer({ DB }, { resp, req: REQ, apiKey: REQ.__api_key, build: "w20" });
+  assert.equal(DB._f[0].via, "agent_supplied");
+});
+
+test("W20: una respuesta servida de cache queda marcada como tal", async () => {
+  const DB = db();
+  const resp = { ...RESP, meta: { checked_via: "cache", cache_hit: true } };
+  await recordAnswer({ DB }, { resp, req: REQ, apiKey: REQ.__api_key, build: "w20" });
+  assert.equal(DB._f[0].via, "cache");
+  assert.equal(DB._f[0].cache_hit, 1);
+});
