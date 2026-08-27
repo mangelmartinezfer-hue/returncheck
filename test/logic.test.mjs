@@ -600,3 +600,43 @@ test("W01b: assembleFromJsonLd sigue confirmando en el caso normal (sin seller_n
   assert.ok(out, "sin seller_name debe seguir confirmando por JSON-LD (no perder cobertura)");
   assert.equal(out.verdict, "YES_WITH_CONDITIONS");
 });
+
+// ---------------------------------------------------------------------------
+// W18 — el plazo es de la POLÍTICA, no del comprador.
+//
+// Estas dos pruebas nacen de un fallo medido en producción, no de una idea: el
+// segundo ensayo de avisos guardó la ventana en null y el aviso salió "text_only"
+// cuando la política había pasado de 60 a 30 días. La causa era que el número de
+// días solo se rellenaba después de las salidas tempranas que dependen de las
+// fechas del comprador.
+// ---------------------------------------------------------------------------
+
+test("W18 EL FALLO DEL ENSAYO: sin fechas del comprador, la ventana de la política se rellena igual", () => {
+  const resp = {
+    verdict: "YES_WITH_CONDITIONS",
+    policy: { merchant_return_days: null, return_category: "UnlimitedWindow" },
+    evidence: { exact_clause: "Items may be returned within 60 days of purchase." },
+  };
+  // Petición SIN purchase_date ni delivery_date: es el caso normal cuando un agente
+  // solo quiere saber qué dice la política.
+  applyDeadline(resp, {}, "2026-08-27");
+  assert.equal(resp.policy.merchant_return_days, 60);
+  assert.equal(resp.policy.return_category, "FiniteReturnWindow");
+  // Y lo que SÍ depende del comprador sigue sin inventarse:
+  assert.equal(resp.policy.deadline_date, null);
+  assert.equal(resp.verdict, "YES_WITH_CONDITIONS");
+});
+
+test("W18 LA OTRA MITAD: con fechas del comprador, el vencimiento sigue funcionando", () => {
+  // El arreglo no puede haberse llevado por delante la conversión a NO, que es la
+  // protección contra el peor error del producto: un SÍ falso fuera de plazo.
+  const resp = {
+    verdict: "YES_WITH_CONDITIONS",
+    policy: { merchant_return_days: null, return_category: "UnlimitedWindow" },
+    evidence: { exact_clause: "Items may be returned within 30 days of purchase." },
+  };
+  applyDeadline(resp, { purchase_date: "2026-01-01" }, "2026-08-27");
+  assert.equal(resp.policy.merchant_return_days, 30);
+  assert.equal(resp.policy.deadline_date, "2026-01-31");
+  assert.equal(resp.verdict, "NO");
+});

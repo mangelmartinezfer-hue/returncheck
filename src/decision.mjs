@@ -46,11 +46,29 @@ function reconcileFiniteCategory(resp, clause) {
   if (days != null) resp.policy.return_category = "FiniteReturnWindow";
 }
 
+// W18 — EL PLAZO TAMBIÉN ES PROPIEDAD DE LA POLÍTICA, NO DEL COMPRADOR.
+//
+// El fallo, visto en el segundo ensayo de avisos contra producción: el número de
+// días solo se rellenaba DESPUÉS de dos salidas tempranas que dependen de las
+// fechas del COMPRADOR (la base de cómputo y su fecha de compra o entrega). Sin
+// esas fechas, `merchant_return_days` se quedaba en null aunque la cita verificada
+// dijera "within 60 days" con todas las letras. El corpus guardaba ese null, y el
+// aviso de cambio no podía decir "pasó de 60 a 30 días" porque no tenía los dos
+// números que comparar.
+//
+// En W17 saqué la CATEGORÍA de ese camino y dejé dentro los DÍAS. Mismo fallo,
+// misma función, arreglado a medias. La regla que lo cierra: lo que describe la
+// POLÍTICA se fija siempre; lo que describe al COMPRADOR (deadline_date, y el
+// vencimiento) solo cuando hay fechas suyas.
 export function applyDeadline(resp, req, today = todayDate()) {
   if (!resp.policy) return resp;
   const clause = resp.evidence && resp.evidence.exact_clause;
-  // Antes de cualquier salida temprana: la categoría es propiedad de la POLÍTICA, no de
-  // la petición. Debe corregirse aunque falten las fechas del comprador.
+  // Antes de cualquier salida temprana: el plazo y la categoría son propiedades de
+  // la POLÍTICA. Deben quedar fijados aunque falten las fechas del comprador.
+  if (resp.policy.merchant_return_days == null) {
+    const desdeCita = windowDaysFromClause(clause);
+    if (desdeCita != null) resp.policy.merchant_return_days = desdeCita;
+  }
   reconcileFiniteCategory(resp, clause);
   const inferredBasis = windowBasisFromClause(clause);
   const declaredBasis = ["purchase_date", "delivery_date"].includes(resp.policy.window_basis)
@@ -62,11 +80,8 @@ export function applyDeadline(resp, req, today = todayDate()) {
   if (!basis) return resp;
   const start = req[basis];
   if (!start) return resp;
-  let days = resp.policy.merchant_return_days;
-  if (days == null && clause) {
-    days = windowDaysFromClause(clause);
-    if (days != null) resp.policy.merchant_return_days = days;
-  }
+  // Ya está fijado arriba: aquí solo se lee.
+  const days = resp.policy.merchant_return_days;
   if (days == null) return resp;
   const deadline = addDays(start, days);
   resp.policy.deadline_date = deadline;
