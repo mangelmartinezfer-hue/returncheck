@@ -11,7 +11,8 @@ import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerd
          policyKeywordHits, policyLinkCandidates,
           clauseIsJurisdictionConditional, policyDefersToSeller,
           clausePositiveButUnverifiedForOpenedItem, conditionExclusionClause,
-          negativeClauseWrongCondition, guessedPolicyUrls } from "./text.mjs";
+          negativeClauseWrongCondition, guessedPolicyUrls,
+          policyScopedToOtherCountry } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
 import { capturePolicy, recordCorpusUse } from "./corpus.mjs";
@@ -315,6 +316,21 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
     resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
     resp.confidence = 0; resp.policy = null; resp.evidence = null;
     resp.reason = "The cited clause could not be verified as supporting the verdict on the page; not asserting a verdict.";
+  }
+
+  // SEGURIDAD W24 (determinista): la politica se declara EXCLUSIVA de otro pais y
+  // el comprador no es de ese pais -> no es SU politica. El texto puede decir "30
+  // dias" con todas las letras y ser perfectamente valido; responder aqui no es un
+  // error de lectura, es contestar la pregunta de otro. Cierra la trampa RC25-13.
+  if (resp.verdict !== "UNKNOWN") {
+    const ajena = policyScopedToOtherCountry(policyText, req.buyer_country);
+    if (ajena) {
+      markGuard(resp, "policy_other_country", ajena);
+      resp.verdict = "UNKNOWN"; resp.returnable = null; resp.status = "indeterminate";
+      resp.confidence = 0; resp.policy = null; resp.evidence = null;
+      resp.reason = "The supplied policy states that it applies only to another country; it is not the policy for this buyer.";
+      resp.answer_human = "Unknown. The policy on this page applies only to another country, not to this buyer.";
+    }
   }
 
   // SEGURIDAD 3P (determinista, no depende del modelo): si viene un vendedor NOMBRADO

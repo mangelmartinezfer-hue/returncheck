@@ -274,7 +274,12 @@ export function clauseIsJurisdictionConditional(clause, policyText) {
 // señales evita falsos positivos como "third-party logistics provider" o
 // "marketplace sellers follow our standard return policy".
 const SELLER_SCOPE_RE = /\b(?:third[- ]?party sellers?|3rd[- ]?party sellers?|marketplace sellers?|marketplace partners?|marketplace vendors?|individual sellers?|external sellers?|sold by[^.!?\n]{0,80}sellers?|sellers?'?s?)\b/gi;
-const SELLER_POLICY_DEFERRAL_RE = /(?:\b(?:each|individual|the)?\s*seller'?s?\s+(?:own|individual|separate|specific)\s+polic(?:y|ies)\b|\b(?:each|individual|the)?\s*seller'?s?\s+(?:own|individual|separate|specific)?\s*(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:their|its)\s+(?:own|individual|separate|specific)\s+(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:seller|vendor|partner)s?\b[^.!?\n]{0,90}\b(?:sets?|provides?|determines?|manages?|governs?|handles?|maintains?|has|have)\b[^.!?\n]{0,70}\b(?:own|separate|individual|specific)?\s*(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:return|refund)s?\s+polic(?:y|ies)\b[^.!?\n]{0,90}\b(?:var(?:y|ies)|differ|set|provided|determined|managed|governed|handled)\b[^.!?\n]{0,70}\b(?:seller|vendor|partner)s?\b|\b(?:subject to|governed by|determined by|set by|handled by|refer to|check|contact)\b[^.!?\n]{0,100}\b(?:seller|vendor|partner)'?s?\b[^.!?\n]{0,80}\b(?:return|refund)?\s*polic(?:y|ies)\b)/i;
+// W24 — dos formas que se nos escapaban, vistas en RC25-16 del holdout:
+//   a) "This policy DOES NOT APPLY to independent marketplace sellers"
+//      — la politica se excluye a si misma en vez de remitir a otra.
+//   b) "whose return TERMS appear on the seller profile"
+//      — "terms" en vez de "policy". Misma idea, otra palabra.
+const SELLER_POLICY_DEFERRAL_RE = /(?:\bthis polic(?:y|ies)\b[^.!?\n]{0,40}\b(?:do(?:es)? not|doesn'?t|don'?t)\s+apply\s+to\b|\b(?:return|refund)s?\s+terms\b[^.!?\n]{0,80}\b(?:seller|vendor|partner)s?\b|\b(?:seller|vendor|partner)s?'?s?\b[^.!?\n]{0,60}\b(?:return|refund)s?\s+terms\b|\b(?:each|individual|the)?\s*seller'?s?\s+(?:own|individual|separate|specific)\s+polic(?:y|ies)\b|\b(?:each|individual|the)?\s*seller'?s?\s+(?:own|individual|separate|specific)?\s*(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:their|its)\s+(?:own|individual|separate|specific)\s+(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:seller|vendor|partner)s?\b[^.!?\n]{0,90}\b(?:sets?|provides?|determines?|manages?|governs?|handles?|maintains?|has|have)\b[^.!?\n]{0,70}\b(?:own|separate|individual|specific)?\s*(?:return|refund)s?\s+polic(?:y|ies)\b|\b(?:return|refund)s?\s+polic(?:y|ies)\b[^.!?\n]{0,90}\b(?:var(?:y|ies)|differ|set|provided|determined|managed|governed|handled)\b[^.!?\n]{0,70}\b(?:seller|vendor|partner)s?\b|\b(?:subject to|governed by|determined by|set by|handled by|refer to|check|contact)\b[^.!?\n]{0,100}\b(?:seller|vendor|partner)'?s?\b[^.!?\n]{0,80}\b(?:return|refund)?\s*polic(?:y|ies)\b)/i;
 
 export function policyDefersToSeller(policyText) {
   if (!policyText) return false;
@@ -528,4 +533,61 @@ export function usableAnswerHuman(text, verdict) {
   if (verdict === "UNKNOWN" && (head === "yes" || head === "no")) return false;
 
   return true;
+}
+
+
+// ---------------------------------------------------------------------------
+// W24 — LA POLÍTICA NO ES LA DEL COMPRADOR (trampa RC25-13 del holdout).
+//
+// El caso: «Canada Return Policy. Orders delivered to Canadian addresses may be
+// returned within 30 days... This policy applies only to purchases made on our
+// Canadian storefront.» Y el comprador es de Estados Unidos.
+//
+// El texto es perfectamente válido y dice 30 días con todas las letras. Por eso
+// el motor lo leía y respondía que sí. Pero no es SU política. Responder aquí no
+// es un error de lectura: es contestar la pregunta de otro.
+//
+// Determinista y estrecho a propósito. Exige DOS cosas en la misma frase:
+//  · una marca de EXCLUSIVIDAD («applies only to», «is limited to»…), y
+//  · un país nombrado.
+// Sin la marca de exclusividad no dispara — una política que solo MENCIONA un
+// país («los pedidos a Canadá pagan aduanas») no se ve afectada. Y si alguna
+// frase con ámbito SÍ incluye el país del comprador, manda esa y no se abstiene.
+//
+// Como todos los guardianes, solo puede convertir una afirmación en un «no lo
+// sé». Nunca al revés. No puede crear un sí falso.
+// ---------------------------------------------------------------------------
+
+const PAIS_RE = {
+  CA: /\bcanad(?:a|ian|ienne)\b/i,
+  US: /\b(?:united states|u\.?s\.?a?\.?|american)\b/i,
+  GB: /\b(?:united kingdom|u\.?k\.?|british)\b/i,
+  AU: /\baustralian?\b/i,
+  DE: /\bgerman(?:y)?\b/i,
+  FR: /\b(?:france|french)\b/i,
+  ES: /\b(?:spain|spanish)\b/i,
+  IT: /\b(?:italy|italian)\b/i,
+  MX: /\bmexic(?:o|an)\b/i,
+  JP: /\bjapan(?:ese)?\b/i,
+  IN: /\bindian?\b/i,
+  BR: /\bbrazil(?:ian)?\b/i,
+};
+
+const EXCLUSIVIDAD_RE =
+  /\b(?:applies only to|only applies to|is limited to|are limited to|valid only (?:for|in)|available only (?:to|in|for)|applicable only (?:to|in)|only (?:for|to) customers in)\b/i;
+
+export function policyScopedToOtherCountry(policyText, buyerCountry) {
+  if (!policyText || !buyerCountry) return null;
+  const pais = String(buyerCountry).trim().toUpperCase();
+  const conAmbito = [];
+  for (const raw of splitSentences(policyText)) {
+    const s = raw.replace(/\s+/g, " ").trim();
+    if (!EXCLUSIVIDAD_RE.test(s)) continue;
+    const nombrados = Object.entries(PAIS_RE).filter(([, re]) => re.test(s)).map(([k]) => k);
+    if (!nombrados.length) continue;
+    // Si alguna frase con ámbito SÍ cubre a este comprador, la política es suya.
+    if (nombrados.includes(pais)) return null;
+    conAmbito.push(s);
+  }
+  return conAmbito.length ? conAmbito[0] : null;
 }

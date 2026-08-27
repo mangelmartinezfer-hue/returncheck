@@ -126,6 +126,8 @@ const PISTAS = {
     "The policy counts its window from the purchase date. Send purchase_date (YYYY-MM-DD) to get a deadline.",
   delivery_date:
     "The policy counts its window from the delivery date. Send delivery_date (YYYY-MM-DD) to get a deadline.",
+  policy_for_buyer_country:
+    "The supplied policy applies only to another country. Send the merchant's policy page for this buyer's country as page_text.",
 };
 
 export function missingInputFor(resp, req = {}) {
@@ -135,6 +137,7 @@ export function missingInputFor(resp, req = {}) {
   // Guardianes que un dato del agente SÍ desbloquea.
   if (guard === "jurisdiction_conditional" && !req.buyer_state) falta.push("buyer_state");
   if (guard === "third_party_seller") falta.push("seller_policy_text");
+  if (guard === "policy_other_country") falta.push("policy_for_buyer_country");
 
   // Y el caso que no es un UNKNOWN pero deja la respuesta a medias: sabemos desde
   // qué fecha cuenta la ventana, pero no tenemos esa fecha, así que no podemos
