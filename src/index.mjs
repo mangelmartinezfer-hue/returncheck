@@ -14,16 +14,16 @@ import { handleStripeWebhook } from "./stripe.mjs";
 import { handleMcp } from "./mcp.mjs";
 import { freeTrial } from "./freetier.mjs";
 import { readMetrics } from "./metrics.mjs";
-import { json, errorResponse, todayDate } from "./util.mjs";
+import { json, errorResponse, todayDate, BUILD } from "./util.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
 import { corpusStats, deleteMerchantCorpus, sha256full } from "./corpus.mjs";
 import { addWatch, removeWatch, listWatches, changesFor } from "./watch.mjs";
+import { findAnswers, answerStats, markAnswerCharged, purgeExpiredAnswers, deleteClientAnswers } from "./answerlog.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
-const BUILD = "2026-08-27-w18-plazo-de-la-politica";
 
 // W09 — Autorizacion de administrador.
 //
@@ -266,6 +266,7 @@ function dataPolicyText(env) {
   const base = env.PUBLIC_BASE_URL || "";
   const contact = env.CONTACT_EMAIL || "";
   const months = Number(env.DATA_RETENTION_MONTHS || "48");
+  const answerMonths = Number(env.ANSWER_RETENTION_MONTHS || "12");
   return `# ReturnCheck — Data & Sources Notice
 
 Last updated: 2026-08-25
@@ -282,6 +283,21 @@ actually be returned. This notice says what we keep, why, and how to get it remo
   date we captured it.
 - A one-way reference to the API client whose request triggered the capture.
   That reference is a hash. Never the API key itself. Never an email address.
+
+## What we store about our own answers
+
+One record per query, so that we can audit and reproduce what we told you:
+
+- The verdict we gave, the clause we quoted, the return window and deadline we
+  computed, which safety check (if any) stopped us, and the build of our code.
+- A link to the exact version of the policy text we read.
+- The structured inputs that changed the verdict: country, buyer state, item
+  condition, return reason, membership, purchase channel, seller, and the
+  purchase or delivery date you sent us. Never free-form text you send us.
+- The product URL with everything after the "?" removed.
+
+Each answer has an id, returned to you as meta.check_id. Quote it and we can
+look up exactly what we did and why.
 
 ## What we do not store
 
@@ -303,7 +319,11 @@ going forward, say so in the same email and we will.
 
 ## Retention
 
-${months} months by default, or until deletion is requested — whichever comes first.
+Policy text: ${months} months by default, or until deletion is requested —
+whichever comes first.
+
+Answer records: ${answerMonths} months. Shorter on purpose. A merchant's policy
+text ages well as a record; a log of who asked what does not.
 
 ## Contact
 
@@ -601,8 +621,12 @@ async function handleCheck(request, env) {
     const charge = await chargeAtomic(env, apiKey, price, resp.evidence ? resp.evidence.policy_version : null);
     if (!charge.charged) return educated402(env, "Insufficient balance. Please top up.");
     cost = price; remaining = charge.remaining;
+    // W19 — que el registro sepa si esto se cobro. "Me cobrasteis por una
+    // respuesta mala" es la reclamacion que mas importa poder mirar.
+    await markAnswerCharged(env, resp.meta && resp.meta.check_id, price, true);
   } else {
     await markFree(env, apiKey); // UNKNOWN gratis
+    await markAnswerCharged(env, resp.meta && resp.meta.check_id, 0, false);
   }
 
   return json(resp, {
@@ -749,6 +773,27 @@ export default {
       // ANTES de que haga falta: es la contrapartida de haber decidido guardarlo
       // todo (doc 40). Si un comercio reclama, esto tiene que funcionar a la
       // primera y sin improvisar.
+      // W19 — consulta del registro de respuestas. Es la herramienta de
+      // reclamaciones: se entra por el check_id que el cliente cita, o por
+      // comercio y fechas cuando no lo tiene. Clave en cabecera, nunca en la URL.
+      if (request.method === "GET" && p === "/admin/answers") {
+        if (!adminOk(request, url, env)) return errorResponse("UNAUTHORIZED", "Admin key required.", 401);
+        const q = url.searchParams;
+        if (q.get("stats") === "1") return json(await answerStats(env));
+        return json(await findAnswers(env, {
+          id: q.get("id"), clientRef: q.get("client_ref"), domain: q.get("domain"),
+          since: q.get("since"), until: q.get("until"), verdict: q.get("verdict"),
+          limit: q.get("limit") || 50,
+        }));
+      }
+      // Barrido de retencion. Prometer 12 meses y no tener el boton es peor que
+      // no prometerlo (doc 40, punto 3).
+      if (request.method === "POST" && p === "/admin/answers/purge") {
+        if (!adminOk(request, url, env)) return errorResponse("UNAUTHORIZED", "Admin key required.", 401);
+        const body = await request.json().catch(() => ({}));
+        if (body && body.client_ref) return json(await deleteClientAnswers(env, body.client_ref));
+        return json(await purgeExpiredAnswers(env));
+      }
       if (request.method === "GET" && p === "/admin/corpus") {
         if (!adminOk(request, url, env)) return errorResponse("INVALID_INPUT", "Not found.", 404);
         return json(await corpusStats(env));

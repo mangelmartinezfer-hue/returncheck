@@ -1,5 +1,12 @@
 // Utilidades compartidas.
 
+// W19 — La versión del código vive aquí, no en index.mjs, porque ahora la
+// necesitan dos sitios: la ruta que la publica y el registro de respuestas, que
+// sin ella no puede decir QUÉ build dio una respuesta concreta. Es el dato que
+// convierte "respondimos mal" en "respondimos mal con este código, y lo
+// arreglamos en este otro".
+export const BUILD = "2026-08-27-w19-registro-de-respuestas";
+
 export function nowISO() {
   return new Date().toISOString();
 }

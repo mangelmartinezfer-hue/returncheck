@@ -13,6 +13,11 @@ PUBLIC_BASE_URL = "https://returncheck.m-angelmartinez-fer.workers.dev"
 # --- Aviso de datos y fuentes (/data-policy). Publicos, no son secretos. ---
 CONTACT_EMAIL = "martiplacsystem@gmail.com"   # direccion de reclamacion/borrado
 DATA_RETENTION_MONTHS = "48"                  # decision 25 ago 2026 (doc 40)
+# --- W19: registro de respuestas. Retencion MAS CORTA que la del corpus a proposito:
+#     el texto de una politica envejece bien como archivo; el registro de quien
+#     pregunto que, no. "false" en ANSWER_LOG lo apaga sin desplegar.
+ANSWER_RETENTION_MONTHS = "12"
+ANSWER_LOG = "true"
 # --- W05: muestreo del modelo. Editable en el panel SIN desplegar, para poder
 #     medir las dos ramas del experimento contra el MISMO build. "0.6" era el
 #     comportamiento anterior: el que Workers AI aplicaba solo, sin decidirlo nadie.
