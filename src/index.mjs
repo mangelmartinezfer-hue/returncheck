@@ -21,6 +21,9 @@ import { clauseInText } from "./text.mjs";
 import { corpusStats, deleteMerchantCorpus, sha256full } from "./corpus.mjs";
 import { addWatch, removeWatch, listWatches, changesFor } from "./watch.mjs";
 import { findAnswers, answerStats, markAnswerCharged, purgeExpiredAnswers, deleteClientAnswers } from "./answerlog.mjs";
+import { x402Activo, retoDePago, leerFirmaDePago, meterEnSobre, cabeceraLiquidacion } from "./x402.mjs";
+import { verificarPago, liquidarPago, veredictoCobrable } from "./facilitador.mjs";
+import { leerIdentificador, huella, consultar as consultarIdem, guardar as guardarIdem } from "./idempotencia.mjs";
 import { inferenceParams } from "./prompt.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
@@ -590,16 +593,155 @@ async function handleSignup(request, env) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// W32 — x402 COSIDO A LA RUTA.
+//
+// LA IDEA QUE ORDENA TODO: x402 no sustituye nada. EXTIENDE el 402 que ya
+// devolvíamos cuando se agotaba el tramo gratis. Antes ese 402 era un callejón sin
+// salida — «no puedes seguir». Ahora es una puerta: «cuesta esto, páguese aquí».
+//
+// Las claves de API siguen igual. El tramo gratis sigue igual. Y con el
+// interruptor apagado, esta ruta se comporta byte a byte como ayer.
+//
+// EL ORDEN, y cada paso está donde está por una razón:
+//
+//   1. Leer la firma            -> aquí se comprueba que lo aceptado es lo nuestro
+//   2. Leer el cuerpo           -> hace falta para la huella de idempotencia
+//   3. Idempotencia             -> ANTES de verificar: un reintento no se re-cobra
+//   4. Verificar con el facilitador -> ANTES de gastar el modelo
+//   5. Motor
+//   6. Liquidar, salvo UNKNOWN  -> DESPUÉS de tener la respuesta
+//   7. Guardar para el reintento
+// ---------------------------------------------------------------------------
+
+/** El reto de pago: 402 con el sobre PAYMENT-REQUIRED. */
+function reto402(env, request, motivo) {
+  const reto = retoDePago(env, { url: request.url, error: motivo });
+  // Sin configuracion no se anuncia precio: se cae al 402 educado de siempre.
+  if (!reto) return educated402(env, "Payment is required and x402 is not fully configured on this server.");
+  return new Response(JSON.stringify(reto), {
+    status: 402,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "PAYMENT-REQUIRED": meterEnSobre(reto),
+      "access-control-allow-origin": "*",
+    },
+  });
+}
+
+async function handleCheckX402(request, env) {
+  const precio = String(env.PRICE_USD || "0.02");
+
+  // 1) La firma, y con ella la comprobacion que NO se delega en el facilitador:
+  //    que lo que el cliente dice haber aceptado sea lo que nosotros pedimos.
+  const firma = leerFirmaDePago(request, env, { precio });
+  if (!firma.ok) return reto402(env, request, firma.error);
+  const aceptado = firma.pago.accepted;
+
+  // 2) El cuerpo. Va antes de todo lo demas porque la huella lo necesita.
+  let body;
+  try { body = await request.json(); } catch { return errorResponse("INVALID_INPUT", "Body must be JSON.", 400); }
+  const v = validateRequest(body);
+  if (!v.ok) return errorResponse(v.code, v.message, 400);
+
+  // 3) Idempotencia ANTES de verificar y antes de gastar el modelo. Un reintento
+  //    no puede costar dinero ni computo.
+  const idPago = leerIdentificador(firma.pago);
+  let h = null;
+  if (idPago) {
+    h = await huella({ aceptado, metodo: "POST", ruta: new URL(request.url).pathname, cuerpo: v.value });
+    const previo = await consultarIdem(env, idPago, h);
+    if (previo && previo.conflicto)
+      return errorResponse("CONFLICT",
+        "This payment identifier was already used for a different request.", 409);
+    if (previo && previo.repetido) {
+      const cabeceras = {
+        "content-type": "application/json; charset=utf-8",
+        "access-control-allow-origin": "*",
+        "X-ReturnCheck-Replay": "true",     // no se ha vuelto a cobrar
+        "X-ReturnCheck-Cost": "0.0000",
+      };
+      if (previo.transaccion)
+        cabeceras["PAYMENT-RESPONSE"] = cabeceraLiquidacion({
+          success: true, transaction: previo.transaccion, network: aceptado.network, payer: null });
+      return new Response(previo.cuerpo, { status: previo.estado, headers: cabeceras });
+    }
+  }
+
+  // 4) Verificar ANTES de trabajar. Falla cerrado.
+  const ver = await verificarPago(env, { pago: firma.pago, requisitos: aceptado });
+  if (!ver.valido) return reto402(env, request, "Payment verification failed: " + ver.motivo);
+
+  // 5) El motor. Del pagador solo se guarda su huella, igual que de una clave.
+  let resp;
+  try { resp = await runCheck(env, { ...v.value, __api_key: ver.pagador || null }); }
+  catch (e) {
+    if (e instanceof EngineError) return errorResponse(e.code, e.message, e.http);
+    return errorResponse("INTERNAL", "Unexpected error.", 500);
+  }
+  const checkId = resp.meta && resp.meta.check_id;
+
+  // 6) Liquidar. UNKNOWN no se liquida: la autorizacion caduca sin usarse y no se
+  //    mueve un centimo. Decision del 22 de agosto, y aqui sale gratis de aplicar.
+  let cabeceraPago = null, coste = 0, transaccion = null;
+  if (veredictoCobrable(resp.verdict, env)) {
+    const liq = await liquidarPago(env, { pago: firma.pago, requisitos: aceptado });
+    if (!liq.cobrado && !liq.pendiente) {
+      // El trabajo esta hecho y lo hemos pagado nosotros. Servir igualmente
+      // convertiria "haz que falle la liquidacion" en la forma de tener respuestas
+      // gratis.
+      await markAnswerCharged(env, checkId, 0, false);
+      return reto402(env, request, "Payment settlement failed: " + liq.motivo);
+    }
+    transaccion = liq.transaccion || null;
+    coste = Number(precio);
+    cabeceraPago = cabeceraLiquidacion({
+      success: liq.cobrado, transaction: liq.transaccion, network: liq.red,
+      payer: liq.pagador, errorReason: liq.pendiente ? "settlement_pending" : null });
+    await markAnswerCharged(env, checkId, coste, true);
+  } else {
+    await markAnswerCharged(env, checkId, 0, false);
+    cabeceraPago = cabeceraLiquidacion({
+      success: false, errorReason: "not_settled_unknown_verdict",
+      network: aceptado.network, payer: ver.pagador });
+  }
+
+  // 7) Guardar para que el reintento no vuelva a cobrar.
+  const cuerpo = JSON.stringify(resp);
+  if (idPago && h) await guardarIdem(env, { id: idPago, huella: h, cuerpo, estado: 200, transaccion });
+
+  return new Response(cuerpo, {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "access-control-allow-origin": "*",
+      "PAYMENT-RESPONSE": cabeceraPago,
+      "X-ReturnCheck-Cost": coste.toFixed(4),
+    },
+  });
+}
+
 async function handleCheck(request, env) {
   const price = Number(env.PRICE_USD || "0.02");
   const chargeOnUnknown = String(env.CHARGE_ON_UNKNOWN || "false") === "true";
+
+  // W32 — si el cliente MANDA firma de pago y x402 esta encendido, va por el camino
+  // de pago. Se mira antes que el tramo gratis a proposito: quien ofrece pagar no
+  // debe gastar su cuota gratuita sin querer.
+  if (x402Activo(env) && request.headers.get("PAYMENT-SIGNATURE"))
+    return await handleCheckX402(request, env);
 
   // 1) Autenticación — o tramo de prueba SIN clave (para agentes autónomos).
   const apiKey = bearer(request);
   if (!apiKey) {
     const trial = await freeTrial(env, request);
-    if (!trial.allowed)
+    if (!trial.allowed) {
+      // W32 — aqui estaba el callejon sin salida. Con x402 encendido, el mismo 402
+      // pasa a ser una puerta: dice cuanto cuesta y donde pagar.
+      if (x402Activo(env))
+        return reto402(env, request, "Free trial exhausted. Payment required.");
       return educated402(env, "Free trial not available (limit reached or disabled). Sign up for an API key with free credit.");
+    }
     // Entrada válida y consulta gratis (con topes). No se cobra.
     let body;
     try { body = await request.json(); } catch { return errorResponse("INVALID_INPUT", "Body must be JSON.", 400); }
