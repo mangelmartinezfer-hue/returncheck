@@ -4,7 +4,7 @@
 import puppeteer from "@cloudflare/puppeteer";
 import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL, inferenceParams } from "./prompt.mjs";
 import { checkInvariants } from "./contract.mjs";
-import { applyDeadline } from "./decision.mjs";
+import { applyDeadline, missingInputFor, missingInputHint } from "./decision.mjs";
 import { todayDate, addDays, sha256hex, BUILD } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
   candidateClauses, candidateBlock, pickClause, usableAnswerHuman,
@@ -501,6 +501,14 @@ export async function assembleFromJsonLd(ld, req, html, meta, sourceUrl) {
 // terminada. Una sola funcion, y las tres vias del motor pasan por ella.
 async function closeOut(env, resp, req, { capture = null } = {}) {
   const final = applyDeadline(resp, req, req.as_of || todayDate());
+
+  // W21 — que un "no lo se" diga TAMBIEN que haria falta para saberlo. Aditivo:
+  // si no falta nada, los campos no aparecen y nadie que ya integro nota el cambio.
+  const falta = missingInputFor(final, req);
+  if (falta.length) {
+    final.missing_input = falta;
+    final.missing_input_hint = missingInputHint(falta);
+  }
 
   if (capture && !req.__no_corpus) {
     const corpusId = await capturePolicy(env, {

@@ -5,7 +5,7 @@
 // sin ella no puede decir QUÉ build dio una respuesta concreta. Es el dato que
 // convierte "respondimos mal" en "respondimos mal con este código, y lo
 // arreglamos en este otro".
-export const BUILD = "2026-08-27-w20-cabecera-y-via";
+export const BUILD = "2026-08-27-w21-que-dato-falta";
 
 export function nowISO() {
   return new Date().toISOString();

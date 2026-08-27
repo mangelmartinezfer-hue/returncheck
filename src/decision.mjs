@@ -92,3 +92,60 @@ export function applyDeadline(resp, req, today = todayDate()) {
   }
   return resp;
 }
+
+// ---------------------------------------------------------------------------
+// W21 — QUÉ DATO FALTA. (Decisión de Miguel, 27 ago 2026.)
+//
+// El planteamiento que traíamos era falso: «nunca equivocarse» contra «resolver
+// más», como si fuera un dial con dos extremos y hubiera que elegir cuánto
+// riesgo comprar. No lo es, y esto es lo que lo cambia: nuestros UNKNOWN no
+// salen de que el modelo dude. Salen de GUARDIANES DETERMINISTAS que disparan
+// por una causa concreta que conocemos con nombre y apellidos desde W11.
+//
+// Si sabemos exactamente por qué no pudimos responder, podemos decir qué haría
+// falta para poder. Y entonces resolver más no exige aflojar la seguridad ni un
+// punto: exige PEDIR EL DATO QUE FALTA.
+//
+// Lo que cambia para el cliente: 434 de 1.148 consultas acaban hoy en UNKNOWN
+// —gratis para él, trabajo hecho para nosotros— y el agente que lo recibe se
+// queda en un callejón sin salida. Con esto vuelve a preguntar con el campo que
+// le decimos y obtiene respuesta. Un callejón se convierte en una segunda
+// consulta útil, y de paso cobrable.
+//
+// NO es una sugerencia del modelo: es una tabla determinista guardián -> campo.
+// Si algún día un guardián nuevo no tiene campo que lo desbloquee, no inventa
+// ninguno; devuelve lista vacía, que es la respuesta honesta.
+// ---------------------------------------------------------------------------
+
+const PISTAS = {
+  buyer_state:
+    "The cited clause depends on state law. Send buyer_state (2-letter code) to resolve it.",
+  seller_policy_text:
+    "This item is sold by a third-party seller. Send that seller's own return policy as page_text to get a verdict.",
+  purchase_date:
+    "The policy counts its window from the purchase date. Send purchase_date (YYYY-MM-DD) to get a deadline.",
+  delivery_date:
+    "The policy counts its window from the delivery date. Send delivery_date (YYYY-MM-DD) to get a deadline.",
+};
+
+export function missingInputFor(resp, req = {}) {
+  const falta = [];
+  const guard = (resp && resp.meta && resp.meta.guard && resp.meta.guard.name) || null;
+
+  // Guardianes que un dato del agente SÍ desbloquea.
+  if (guard === "jurisdiction_conditional" && !req.buyer_state) falta.push("buyer_state");
+  if (guard === "third_party_seller") falta.push("seller_policy_text");
+
+  // Y el caso que no es un UNKNOWN pero deja la respuesta a medias: sabemos desde
+  // qué fecha cuenta la ventana, pero no tenemos esa fecha, así que no podemos
+  // decir hasta cuándo. Para un agente de compras eso es media respuesta.
+  const base = resp && resp.policy && resp.policy.window_basis;
+  if (base && (base === "purchase_date" || base === "delivery_date") && !req[base]) falta.push(base);
+
+  return falta;
+}
+
+export function missingInputHint(campos) {
+  if (!campos || !campos.length) return null;
+  return campos.map((c) => PISTAS[c]).filter(Boolean).join(" ");
+}
