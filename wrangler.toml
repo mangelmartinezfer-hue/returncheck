@@ -50,6 +50,10 @@ X402_TIMEOUT_SECONDS = "60"
 # cerrado a proposito.
 X402_FACILITATOR = ""
 X402_TIMEOUT_MS = "8000"
+# Cuanto tiempo se recuerda un identificador de pago para no cobrar dos veces por
+# el mismo reintento. Mas largo que cualquier ventana de reintento razonable, y no
+# eterno.
+IDEMPOTENCY_HOURS = "24"
 # --- W05: muestreo del modelo. Editable en el panel SIN desplegar, para poder
 #     medir las dos ramas del experimento contra el MISMO build. "0.6" era el
 #     comportamiento anterior: el que Workers AI aplicaba solo, sin decidirlo nadie.
