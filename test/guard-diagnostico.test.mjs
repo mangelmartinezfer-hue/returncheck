@@ -121,6 +121,9 @@ test("W11: una respuesta buena no lleva guard ninguno", async () => {
     evidence: { source_url: "https://example.com/p/x", clause_id: null,
                 exact_clause: "Items may be returned within 30 days of purchase for a full refund." },
   })), { product_url: "https://example.com/p/x", buyer_country: "US", page_text: poliza });
-  assert.equal(r.verdict, "YES_WITH_CONDITIONS");
+  // W23 — a esta prueba le da igual el SABOR del positivo: lo que vigila es
+  // otra cosa. Se comprueba que el veredicto sea positivo, para que un cambio
+  // de taxonomia no la rompa por algo de lo que no trata.
+  assert.ok(["YES", "YES_WITH_CONDITIONS"].includes(r.verdict), r.verdict);
   assert.equal(r.meta.guard, undefined);
 });

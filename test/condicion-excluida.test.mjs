@@ -100,7 +100,10 @@ test("motor: un artículo SIN ABRIR con la misma política sigue siendo devolvib
   // El guard entero solo existe para artículos abiertos. Si W12 tocara este caso,
   // habríamos convertido una política normal en un no permanente.
   const r = await runCheck(envFalso(IA_CITANDO_MAL), { ...PETICION, item_condition: "unopened" });
-  assert.equal(r.verdict, "YES_WITH_CONDITIONS");
+  // W23 — a esta prueba le da igual el SABOR del positivo: lo que vigila es
+  // otra cosa. Se comprueba que el veredicto sea positivo, para que un cambio
+  // de taxonomia no la rompa por algo de lo que no trata.
+  assert.ok(["YES", "YES_WITH_CONDITIONS"].includes(r.verdict), r.verdict);
   assert.equal(r.policy.merchant_return_days, 15);
 });
 
