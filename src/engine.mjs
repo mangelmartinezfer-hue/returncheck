@@ -228,11 +228,26 @@ function markGuard(resp, name, rejectedClause) {
   resp.meta = { ...resp.meta, guard: { name, rejected_clause: rejectedClause || null } };
 }
 
+// W15 — un host en minusculas y sin "www.", venga como venga.
+function hostOf(v) {
+  const t = String(v || "").trim();
+  if (!t) return null;
+  try { return new URL(t).hostname.replace(/^www\./, "").toLowerCase(); } catch {}
+  try { return new URL("https://" + t).hostname.replace(/^www\./, "").toLowerCase(); } catch {}
+  return null;
+}
+
 async function assemble(ai, req, policyText, meta, sourceUrl) {
   const source = sourceUrl || req.product_url;
   const domainFromUrl = (() => { try { return new URL(req.product_url).hostname.replace(/^www\./, ""); } catch { return ""; } })();
   const merchant = ai.merchant_resolved || { name: domainFromUrl, domain: domainFromUrl, is_marketplace_third_party: false };
   if (!merchant.domain) merchant.domain = domainFromUrl;
+  // W15 — el modelo devuelve a veces la URL entera donde tiene que ir un host.
+  // Se vio en el ensayo del corpus: "domain":"https://prueba-corpus-w14.example".
+  // La columna del corpus si guarda el host limpio, asi que el borrado por
+  // comercio funcionaba — pero un cliente que construya esa peticion a partir de
+  // este campo no casaria con nada. Se normaliza aqui, en un solo sitio.
+  merchant.domain = hostOf(merchant.domain) || domainFromUrl;
   if (!("seller" in merchant)) merchant.seller = null;
   if (!("country" in merchant)) merchant.country = req.buyer_country || null;
 
@@ -571,12 +586,17 @@ export async function runCheck(env, req) {
   // W14 — LA PUERTA. Se guarda la politica que acabamos de leer, ANTES de que
   // llegue el trafico y no despues. Nunca rompe la consulta: si falla, devuelve
   // null y el cliente no se entera. Ver src/corpus.mjs para el porque.
-  const corpusId = await capturePolicy(env, {
+  const corpusId = req.__no_corpus ? null : await capturePolicy(env, {
     policyText, sourceUrl, via: checked_via,
     merchantName: resp.merchant_resolved && resp.merchant_resolved.name,
     country: resp.merchant_resolved && resp.merchant_resolved.country,
     apiKey: req.__api_key,
     scope: { seller: req.seller_name || null, channel: req.purchase_channel || null, membership: req.membership || null },
+    // W16 — lo que acabamos de extraer viaja con la captura: es lo que permite
+    // decir EN QUE cambio una politica, no solo QUE cambio.
+    parsed: resp.policy
+      ? { days: resp.policy.merchant_return_days ?? null, category: resp.policy.return_category || null }
+      : null,
   });
   if (corpusId) {
     resp.meta = { ...resp.meta, corpus_id: corpusId };

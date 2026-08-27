@@ -31,13 +31,14 @@
 //     la anterior con `supersedes_id`. El histórico es el producto.
 
 import { nowISO } from "./util.mjs";
+import { recordPolicyChange } from "./watch.mjs";
 
 // Digest COMPLETO, a proposito. El sha256hex de util.mjs devuelve 12 caracteres
 // —suficiente para etiquetar la version de una politica— pero aqui se usa para
 // dos cosas donde no quiero recortes: la huella que decide si una politica ha
 // cambiado, y el `client_ref` con el que se borra por cliente. 48 bits bastan
 // hoy; el coste de usar los 256 es cero y no hay que volver a pensarlo.
-async function sha256full(text) {
+export async function sha256full(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(text)));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -135,7 +136,7 @@ function uuid() {
  * NUNCA lanza: una consulta no puede romperse por la captura.
  */
 export async function capturePolicy(env, {
-  policyText, sourceUrl, via, merchantName, country, apiKey, scope,
+  policyText, sourceUrl, via, merchantName, country, apiKey, scope, parsed,
 } = {}) {
   try {
     if (!env || !env.DB) return null;
@@ -159,8 +160,11 @@ export async function capturePolicy(env, {
     // Hay contenido distinto para este comercio: es una VERSIÓN NUEVA. Se enlaza
     // con la última que teníamos. Nunca se sobrescribe — el histórico de cambios
     // de política es exactamente el producto que nadie más tiene.
+    // W16 — se lee tambien lo que el motor extrajo de la version ANTERIOR. Sin eso
+    // se puede decir "algo cambio" pero no "paso de 60 a 30 dias", que es la
+    // diferencia entre un aviso util y una notificacion que se ignora.
     const anterior = await env.DB
-      .prepare("SELECT id FROM policy_corpus WHERE merchant_domain = ? AND deleted_at IS NULL ORDER BY captured_at DESC LIMIT 1")
+      .prepare("SELECT id, parsed_days, parsed_category FROM policy_corpus WHERE merchant_domain = ? AND deleted_at IS NULL ORDER BY captured_at DESC LIMIT 1")
       .bind(dominio).first();
 
     const { source_kind, provenance } = clasificarOrigen(via);
@@ -176,8 +180,9 @@ export async function capturePolicy(env, {
          content, content_hash, content_chars, captured_at, effective_at,
          scope_general, scope_category, scope_product, scope_seller, scope_channel, scope_membership,
          review_state, pii_suspected, supersedes_id,
-         client_ref, retention_until, deleted_at
-       ) VALUES (?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?,?,?, ?,?,?, ?,?,?)`
+         client_ref, retention_until, deleted_at,
+         parsed_days, parsed_category
+       ) VALUES (?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?,?,?, ?,?,?, ?,?,?, ?,?)`
     ).bind(
       id, dominio, merchantName || null, country || null,
       sourceUrl || null, source_kind, provenance, null,
@@ -186,8 +191,21 @@ export async function capturePolicy(env, {
       s.category || null, s.product || null, s.seller || null, s.channel || null, s.membership || null,
       "unreviewed", marcasPII.length ? 1 : 0, (anterior && anterior.id) || null,
       apiKey ? await sha256full(apiKey) : null,
-      mesesDespues(ahora, env.DATA_RETENTION_MONTHS), null
+      mesesDespues(ahora, env.DATA_RETENTION_MONTHS), null,
+      (parsed && Number.isFinite(parsed.days)) ? parsed.days : null,
+      (parsed && parsed.category) || null
     ).run();
+
+    // W16 — si esto SUSTITUYE a una version anterior, es un cambio de politica.
+    // Se registra aqui porque es el unico punto del sistema que tiene delante las
+    // dos versiones a la vez.
+    if (anterior && anterior.id) {
+      await recordPolicyChange(env, {
+        domain: dominio, fromCorpusId: anterior.id, toCorpusId: id,
+        before: { days: anterior.parsed_days, category: anterior.parsed_category },
+        after: { days: (parsed && parsed.days) ?? null, category: (parsed && parsed.category) || null },
+      });
+    }
 
     return id;
   } catch (_) {

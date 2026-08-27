@@ -43,6 +43,7 @@ test("PII: una política normal, sin datos personales, no se marca", () => {
 function dbFalsa() {
   const filas = [];
   const usos = [];
+  const cambios = [];
   const run = (sql, args) => {
     const s = sql.replace(/\s+/g, " ").trim();
     if (s.startsWith("INSERT INTO policy_corpus (")) {
@@ -50,13 +51,15 @@ function dbFalsa() {
              authorized_by, content, content_hash, content_chars, captured_at, effective_at,
              scope_general, scope_category, scope_product, scope_seller, scope_channel,
              scope_membership, review_state, pii_suspected, supersedes_id, client_ref,
-             retention_until, deleted_at] = args;
+             retention_until, deleted_at, parsed_days, parsed_category] = args;
       filas.push({ id, merchant_domain, merchant_name, country, source_url, source_kind, provenance,
         authorized_by, content, content_hash, content_chars, captured_at, effective_at, scope_general,
         scope_category, scope_product, scope_seller, scope_channel, scope_membership, review_state,
-        pii_suspected, supersedes_id, client_ref, retention_until, deleted_at });
+        pii_suspected, supersedes_id, client_ref, retention_until, deleted_at,
+        parsed_days, parsed_category });
       return {};
     }
+    if (s.startsWith("INSERT INTO policy_change")) { cambios.push({ id: args[0], merchant_domain: args[1], kind: args[5], summary: args[10] }); return {}; }
     if (s.startsWith("INSERT INTO policy_corpus_use")) {
       usos.push({ corpus_id: args[0], used_at: args[1], context_kind: args[2], verdict: args[4] });
       return {};
@@ -80,7 +83,7 @@ function dbFalsa() {
     const s = sql.replace(/\s+/g, " ").trim();
     if (s.startsWith("SELECT id FROM policy_corpus WHERE merchant_domain = ? AND content_hash"))
       return filas.find((f) => f.merchant_domain === args[0] && f.content_hash === args[1]) || null;
-    if (s.startsWith("SELECT id FROM policy_corpus WHERE merchant_domain = ? AND deleted_at IS NULL"))
+    if (s.startsWith("SELECT id, parsed_days, parsed_category FROM policy_corpus WHERE merchant_domain = ? AND deleted_at IS NULL"))
       return [...filas].reverse().find((f) => f.merchant_domain === args[0] && !f.deleted_at) || null;
     if (s.includes("COUNT(*) AS n FROM policy_corpus WHERE merchant_domain"))
       return { n: filas.filter((f) => f.merchant_domain === args[0] && !f.deleted_at).length };
@@ -94,7 +97,7 @@ function dbFalsa() {
     return {};
   };
   return {
-    _filas: filas, _usos: usos,
+    _filas: filas, _usos: usos, _cambios: cambios,
     prepare: (sql) => ({
       bind: (...args) => ({ run: async () => run(sql, args), first: async () => first(sql, args), all: async () => ({ results: [] }) }),
       run: async () => run(sql, []), first: async () => first(sql, []), all: async () => ({ results: [] }),
@@ -227,4 +230,45 @@ test("resumen: cuenta documentos, comercios, marcados y versiones", async () => 
   assert.equal(s.pii_suspected, 1);
   assert.equal(s.superseding_versions, 1);
   assert.equal(s.reviewed, 0);
+});
+
+// ---------- W15: lo que el ensayo en producción destapó ----------
+
+import { runCheck } from "../src/engine.mjs";
+
+const envMotor = (DB, ia) => ({ DB, AI: { run: async () => ({ response: JSON.stringify(ia) }) } });
+const IA_OK = {
+  verdict: "YES_WITH_CONDITIONS", confidence: 0.9,
+  answer_human: "Yes, within 30 days.", reason: null,
+  // El modelo devuelve la URL ENTERA donde toca un host. Pasó de verdad.
+  merchant_resolved: { name: "Shop", domain: "https://shop.example.com/p/thing", is_marketplace_third_party: false },
+  policy: { return_category: "FiniteReturnWindow", merchant_return_days: 30, window_basis: "delivery_date",
+            return_method: ["ReturnByMail"], return_fees: null, refund_type: "FullRefund" },
+  evidence: { source_url: "https://shop.example.com/p/thing", clause_id: null,
+              exact_clause: "Items may be returned within 30 days of delivery for a full refund to the original payment method." },
+};
+const PET = { product_url: "https://shop.example.com/p/thing", buyer_country: "US", item_condition: "unopened", page_text: POLIZA };
+
+test("W15: merchant_resolved.domain sale como HOST aunque el modelo mande una URL", async () => {
+  // Si esto queda como URL, un cliente que pida el borrado usando ese campo no
+  // casaría con nada: la columna del corpus guarda el host limpio.
+  const r = await runCheck(envMotor(dbFalsa(), IA_OK), PET);
+  assert.equal(r.merchant_resolved.domain, "shop.example.com");
+});
+
+test("W15 LA CONTAMINACIÓN QUE HABÍA: el banco de pruebas NO entra en el corpus", async () => {
+  // Una pasada de /eval son 18 o 25 documentos sintéticos escritos por nosotros.
+  // El corpus es el material del que salen los avisos de cambio de política;
+  // llenarlo de casos falsos lo estropea justo en lo que lo hace valioso.
+  const DB = dbFalsa();
+  await runCheck(envMotor(DB, IA_OK), { ...PET, __no_corpus: true });
+  assert.equal(DB._filas.length, 0);
+});
+
+test("W15: una consulta normal SÍ sigue capturando", async () => {
+  const DB = dbFalsa();
+  const r = await runCheck(envMotor(DB, IA_OK), PET);
+  assert.equal(DB._filas.length, 1);
+  assert.equal(DB._filas[0].merchant_domain, "shop.example.com");
+  assert.equal(r.meta.corpus_id, DB._filas[0].id);
 });
