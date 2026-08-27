@@ -87,6 +87,13 @@ export async function recordAnswer(env, { resp, req, apiKey, build, corpusId } =
   try {
     if (!env || !env.DB || !resp) return null;
     if (String(env.ANSWER_LOG ?? "true") === "false") return null;
+    // W22 — el EXAMEN no ensucia el registro. Mismo criterio que W15 con el
+    // corpus y por la misma razon: 43 respuestas sinteticas por pasada mezcladas
+    // con las reales convierten el registro de reclamaciones en un sitio donde
+    // hay que filtrar antes de mirar, y un archivo que hay que limpiar para
+    // usarlo deja de usarse. La regla vive AQUI, no en el motor, para que el
+    // modulo se proteja solo y se pueda probar de verdad.
+    if (req && req.__no_corpus) return null;
 
     const ahora = nowISO();
     const id = uuid();
