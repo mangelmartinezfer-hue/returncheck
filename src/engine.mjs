@@ -5,7 +5,7 @@ import puppeteer from "@cloudflare/puppeteer";
 import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL, inferenceParams } from "./prompt.mjs";
 import { checkInvariants } from "./contract.mjs";
 import { applyDeadline } from "./decision.mjs";
-import { todayDate, addDays, sha256hex } from "./util.mjs";
+import { todayDate, addDays, sha256hex, BUILD } from "./util.mjs";
 import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
   candidateClauses, candidateBlock, pickClause, usableAnswerHuman,
          policyKeywordHits, policyLinkCandidates,
@@ -15,6 +15,7 @@ import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerd
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
 import { capturePolicy, recordCorpusUse } from "./corpus.mjs";
+import { recordAnswer } from "./answerlog.mjs";
 
 class EngineError extends Error {
   constructor(code, http, message) { super(message); this.code = code; this.http = http; }
@@ -521,6 +522,17 @@ async function closeOut(env, resp, req, { capture = null } = {}) {
   }
 
   await recordCheck(env, final);
+
+  // W19 — el registro de la respuesta. Va DESPUÉS de todo lo demás y con la
+  // respuesta ya cerrada, por la lección de W17: lo que se guarda tiene que ser
+  // exactamente lo que dimos, no un estado intermedio. El id se devuelve al
+  // cliente para que pueda citarlo en una reclamación.
+  const checkId = await recordAnswer(env, {
+    resp: final, req, apiKey: req.__api_key, build: BUILD,
+    corpusId: final.meta && final.meta.corpus_id,
+  });
+  if (checkId) final.meta = { ...final.meta, check_id: checkId };
+
   return final;
 }
 
