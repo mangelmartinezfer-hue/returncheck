@@ -24,7 +24,7 @@ ANSWER_LOG = "true"
 #     La direccion de cobro NO es un secreto: es publica por definicion, ahi es
 #     donde se ve el dinero entrar. Pero no hay ninguna clave privada en este
 #     proyecto: nosotros solo COBRAMOS, no firmamos ni movemos fondos.
-X402_ENABLED = "false"
+X402_ENABLED = "true"
 X402_NETWORK = "eip155:84532"                 # Base Sepolia (pruebas). Mainnet: eip155:8453
 # La direccion de recepcion. Es PUBLICA por definicion: viaja en el reto de pago y
 # cualquiera puede ver su saldo y su historial en Basescan. Por eso es una cuenta
