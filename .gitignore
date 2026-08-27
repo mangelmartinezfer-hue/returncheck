@@ -8,3 +8,6 @@ mcp-publisher.tar.gz
 
 # Materiales privados (no publicar)
 _local/
+
+# Parches de trabajo: se aplican con git am y se quedan en local.
+*.patch
