@@ -156,3 +156,56 @@ test("UNKNOWN NO SE COBRA — la decisión de Miguel, en una línea", async () =
 test("y el interruptor para cambiar de idea sin desplegar", async () => {
   assert.equal(veredictoCobrable("UNKNOWN", { CHARGE_ON_UNKNOWN: "true" }), true);
 });
+
+// ---------------------------------------------------------------------------
+// W39 — las extensiones no viajan al facilitador
+// ---------------------------------------------------------------------------
+
+test("W39: el bloque extensions NO se reenvia al facilitador", async () => {
+  // MEDIDO EL 27 DE AGOSTO contra Mogami: con `extensions` -> HTTP 500 (una
+  // pagina HTML de error, sin mensaje). Sin `extensions`, el MISMO pago ->
+  // isValid: true. Cinco variantes, cinco de cinco.
+  const conExt = { ...PAGO, payload: { ...PAGO.payload,
+    extensions: { "payment-identifier": "ensayo-rc-pago-0001" } } };
+  const f = facilitadorQueDice({ isValid: true, payer: "0x857b" });
+  await verificarPago(ENV, { pago: conExt, requisitos: REQUISITOS }, { fetchImpl: f.impl });
+
+  const enviado = f.llamadas[0].cuerpo.paymentPayload;
+  assert.equal(enviado.payload.extensions, undefined);
+  // Y lo que el facilitador SI necesita sigue intacto: la firma y la autorizacion.
+  assert.equal(enviado.payload.signature, "0xsig");
+});
+
+test("W39: el sobre ORIGINAL no se toca — de ahi sale la idempotencia", async () => {
+  // Si lo mutaramos, leerIdentificador dejaria de ver el identificador y el
+  // reintento cobraria dos veces. Justo lo contrario de lo que buscamos.
+  const conExt = { ...PAGO, payload: { ...PAGO.payload,
+    extensions: { "payment-identifier": "ensayo-rc-pago-0001" } } };
+  const f = facilitadorQueDice({ isValid: true, payer: "0x857b" });
+  await verificarPago(ENV, { pago: conExt, requisitos: REQUISITOS }, { fetchImpl: f.impl });
+  assert.equal(conExt.payload.extensions["payment-identifier"], "ensayo-rc-pago-0001");
+});
+
+test("W39: al liquidar tampoco viajan", async () => {
+  const conExt = { ...PAGO, payload: { ...PAGO.payload, extensions: { algo: "x" } } };
+  const f = facilitadorQueDice({ success: true, transaction: "0xabc" });
+  await liquidarPago(ENV, { pago: conExt, requisitos: REQUISITOS }, { fetchImpl: f.impl });
+  assert.equal(f.llamadas[0].cuerpo.paymentPayload.payload.extensions, undefined);
+});
+
+test("W39: el interruptor para el dia que haga falta enviarlas", async () => {
+  // Un facilitador que SI necesite una extension suya (patrocinio de gas, por
+  // ejemplo). Hasta entonces, apagado.
+  const conExt = { ...PAGO, payload: { ...PAGO.payload, extensions: { algo: "x" } } };
+  const f = facilitadorQueDice({ isValid: true });
+  await verificarPago({ ...ENV, X402_ENVIAR_EXTENSIONES: "true" },
+    { pago: conExt, requisitos: REQUISITOS }, { fetchImpl: f.impl });
+  assert.deepEqual(f.llamadas[0].cuerpo.paymentPayload.payload.extensions, { algo: "x" });
+});
+
+test("W39: un pago SIN extensions pasa igual que siempre", async () => {
+  const f = facilitadorQueDice({ isValid: true, payer: "0x857b" });
+  const r = await verificarPago(ENV, { pago: PAGO, requisitos: REQUISITOS }, { fetchImpl: f.impl });
+  assert.equal(r.valido, true);
+  assert.deepEqual(f.llamadas[0].cuerpo.paymentPayload, PAGO);
+});

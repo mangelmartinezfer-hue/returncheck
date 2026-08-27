@@ -72,8 +72,43 @@ async function llamar(env, ruta, cuerpo, { fetchImpl = fetch } = {}) {
   }
 }
 
-function cuerpoFacilitador(pago, requisitos) {
-  return { x402Version: 2, paymentPayload: pago, paymentRequirements: requisitos };
+/**
+ * W39 — LAS EXTENSIONES NO SE REENVÍAN AL FACILITADOR.
+ *
+ * MEDIDO, no supuesto: Mogami devuelve 500 —una página HTML de error, sin
+ * mensaje— en cuanto el sobre lleva un bloque `extensions`. Da igual cuál: se
+ * probó con `payment-identifier` y con una inventada, y las dos revientan. Sin
+ * `extensions`, el MISMO pago devuelve `isValid: true`. Cinco variantes, cinco
+ * de cinco. Su `/supported` ya declaraba `extensions: []`; lo que no hace es
+ * rechazarlas limpiamente.
+ *
+ * PERO EL MOTIVO PARA QUITARLAS NO ES ESE FALLO, y conviene no confundirlo: el
+ * identificador de pago es NUESTRO. El cliente nos lo manda a nosotros para que
+ * no le cobremos dos veces por un reintento; el facilitador no lo necesita ni
+ * lo entiende. Reenviárselo era enseñarle papeles de otro. Aunque Mogami lo
+ * arregle mañana, esto se queda.
+ *
+ * NO ROMPE LA FIRMA: lo firmado es la autorización EIP-3009 —quién, cuánto, a
+ * quién, hasta cuándo, con qué nonce—. Las extensiones se añaden DESPUÉS de
+ * firmar, así que quitarlas no toca nada de lo que el facilitador verifica.
+ *
+ * Y NO SE PIERDE LA IDEMPOTENCIA: el identificador ya se leyó antes, en
+ * index.mjs, sobre el sobre original. Esto solo afecta a la copia que sale
+ * hacia el facilitador.
+ *
+ * El interruptor existe por si algún día usamos un facilitador que SÍ necesite
+ * una extensión suya (por ejemplo, patrocinio de gas). Hasta entonces, no.
+ */
+export function limpiarParaFacilitador(pago, env = {}) {
+  if (String(env.X402_ENVIAR_EXTENSIONES) === "true") return pago;
+  if (!pago || !pago.payload || pago.payload.extensions === undefined) return pago;
+  // Copia: el sobre original NO se toca, que es de donde sale la idempotencia.
+  const { extensions, ...restoDelPayload } = pago.payload;
+  return { ...pago, payload: restoDelPayload };
+}
+
+function cuerpoFacilitador(pago, requisitos, env = {}) {
+  return { x402Version: 2, paymentPayload: limpiarParaFacilitador(pago, env), paymentRequirements: requisitos };
 }
 
 /**
@@ -83,7 +118,7 @@ function cuerpoFacilitador(pago, requisitos) {
  * válido = false. No hay beneficio de la duda.
  */
 export async function verificarPago(env, { pago, requisitos }, opciones = {}) {
-  const r = await llamar(env, "/verify", cuerpoFacilitador(pago, requisitos), opciones);
+  const r = await llamar(env, "/verify", cuerpoFacilitador(pago, requisitos, env), opciones);
   if (!r.ok) return { valido: false, motivo: r.error, pagador: null };
 
   const d = r.datos;
@@ -101,7 +136,7 @@ export async function verificarPago(env, { pago, requisitos }, opciones = {}) {
  * sirve la respuesta igual y se anota para conciliar.
  */
 export async function liquidarPago(env, { pago, requisitos }, opciones = {}) {
-  const r = await llamar(env, "/settle", cuerpoFacilitador(pago, requisitos), opciones);
+  const r = await llamar(env, "/settle", cuerpoFacilitador(pago, requisitos, env), opciones);
   if (!r.ok) return { cobrado: false, pendiente: false, transaccion: "", red: "", pagador: null, motivo: r.error };
 
   const d = r.datos;
