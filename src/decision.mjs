@@ -199,12 +199,32 @@ const ESTADO_FISICO = [
   [/\b(?:original )?tags?\b[^.!?\n]{0,30}\battached\b|\bwith tags\b/i, "original tags are still attached"],
   [/\bseal(?:s)?\b[^.!?\n]{0,20}\bintact\b/i, "the seal is intact"],
   [/\b(?:all )?original accessories\b/i, "all original accessories are included"],
+  [/\ball (?:included|original) parts\b/i, "all included parts are present"],
+  [/\b(?:serial[- ]numbered |original )box\b/i, "the original box is included"],
   [/\bnew condition\b/i, "item is in new condition"],
 ];
 
 // Condiciones sobre lo que el comprador RECIBE. Nunca se dan por cumplidas.
+// W26 — tres formas mas, las tres vistas en el examen y las tres del mismo tipo:
+// el comprador recibe algo distinto o menos de lo que pidio.
+//   · "may be exchanged, BUT NOT REFUNDED"  (RC25-02) — la exclusion en negativo,
+//     que no es lo mismo que "exchange only" y se nos escapaba.
+//   · "a 49 dollar pickup fee is DEDUCTED FROM THE REFUND" (RC25-19) — una comision
+//     de reposicion es solo UNA de las formas de cobrar por devolver. Cualquier
+//     descuento sobre el reembolso cuenta igual: el comprador recibe menos.
 const CONDICION_RESULTADO =
-  /\bstore credit\b|\bmerchandise credit\b|\bexchange only\b|\breplacement only\b|\brestocking fee\b|\bcash refunds?\s+(?:are|is)\s+not\b|\bno cash refunds?\b/i;
+  /\bstore credit\b|\bmerchandise credit\b|\bexchange only\b|\breplacement only\b|\brestocking fee\b|\bcash refunds?\s+(?:are|is)\s+not\b|\bno cash refunds?\b|\bbut not refunded\b|\bnot refunded\b|\bdeducted from (?:the |your )?refund\b|\bfee\b[^.!?\n]{0,60}\bdeducted\b|\bless a\b[^.!?\n]{0,30}\bfee\b/i;
+
+// W26 — ESTADO DE CUENTA, la quinta familia. Distinta de las otras cuatro y hay
+// que verla bien: que un articulo este SIN ABRIR es un hecho fisico que el
+// comprador observa y nosotros podemos dar por bueno. Que su membresia este ACTIVA
+// no lo es — es un estado que controla el comercio, no el comprador, y nadie
+// puede confirmarlo desde fuera. Nos lo dicen; no lo sabemos.
+//
+// RC25-12: "Plus members may return within 90 days. Customers without an active
+// Plus membership have 30 days." La ventana entera depende de eso.
+const ESTADO_CUENTA_OPACO =
+  /\bactive\b[^.!?\n]{0,25}\bmembership\b|\bmembers?\b[^.!?\n]{0,50}\bmay return\b|\bmembers only\b|\bmembership (?:is )?required\b|\bwithout an active\b/i;
 
 // PROCEDIMIENTO que el comprador tiene que cumplir y que no podemos comprobar.
 // Encontrado por una prueba que ya existía: «Unopened bottles may be returned
@@ -259,6 +279,8 @@ export function classifyPositive(resp, req = {}, policyText = null) {
     return { verdict: "YES_WITH_CONDITIONS", assumed_satisfied: [], pending: "eligibility_unverifiable" };
   if (PROCEDIMIENTO_OPACO.test(contexto))
     return { verdict: "YES_WITH_CONDITIONS", assumed_satisfied: [], pending: "procedure_unverifiable" };
+  if (ESTADO_CUENTA_OPACO.test(contexto))
+    return { verdict: "YES_WITH_CONDITIONS", assumed_satisfied: [], pending: "account_status_unverifiable" };
 
   // 1: estado físico.
   const nombradas = ESTADO_FISICO.filter(([re]) => re.test(clause)).map(([, texto]) => texto);

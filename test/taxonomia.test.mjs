@@ -186,3 +186,67 @@ test("W25 LO QUE NO PUEDE ROMPER: los 4 del holdout siguen siendo YES con su tex
     assert.equal(r.verdict, "YES", cita.slice(0, 40));
   }
 });
+
+// ---------------------------------------------------------------------------
+// W26 — los tres que quedaban, y la quinta familia.
+//
+// Los tres salieron del examen, no de mi cabeza. Y los tres se arreglan hacia el
+// lado PRUDENTE: pasan de YES a YES_WITH_CONDITIONS. Ninguno afloja nada.
+// ---------------------------------------------------------------------------
+
+test("W26 RC25-02: 'may be exchanged, BUT NOT REFUNDED' es una condición de resultado", () => {
+  // La exclusion en negativo. No es lo mismo que "exchange only" y se nos escapaba.
+  const texto = "Opened headphones may be exchanged, but not refunded, within 14 calendar days after delivery. The customer must return the headphones with the serial-numbered box and all included parts.";
+  const cita = "Opened headphones may be exchanged, but not refunded, within 14 calendar days after delivery.";
+  const r = classifyPositive(citaSola(cita), { item_condition: "opened" }, texto);
+  assert.equal(r.verdict, "YES_WITH_CONDITIONS");
+  assert.equal(r.pending, "outcome_condition");
+});
+
+test("W26 RC25-19: una comisión de reposición es solo UNA forma de cobrar por devolver", () => {
+  // Cualquier descuento sobre el reembolso cuenta igual: el comprador recibe menos
+  // dinero del que pago. Mirar solo "restocking fee" era mirar una palabra, no una idea.
+  const texto = "Furniture may be returned within 30 calendar days after delivery. Home pickup is required for assembled furniture, and a 49 dollar pickup fee is deducted from the refund.";
+  const cita = "Furniture may be returned within 30 calendar days after delivery.";
+  const r = classifyPositive(citaSola(cita), { item_condition: "unopened" }, texto);
+  assert.equal(r.verdict, "YES_WITH_CONDITIONS");
+  assert.equal(r.pending, "outcome_condition");
+});
+
+test("W26 LA QUINTA FAMILIA: la membresía activa NO se puede dar por cumplida", () => {
+  // La distincion que importa: que un articulo este SIN ABRIR es un hecho fisico
+  // que el comprador observa y nosotros podemos dar por bueno. Que su membresia
+  // este ACTIVA es un estado que controla el COMERCIO — nos lo dicen, no lo
+  // sabemos, y aqui la ventana entera depende de eso (90 dias contra 30).
+  const texto = "ClubMarket Plus members may return eligible standard merchandise within 90 calendar days of purchase. Customers without an active Plus membership have 30 calendar days from purchase.";
+  const cita = "ClubMarket Plus members may return eligible standard merchandise within 90 calendar days of purchase.";
+  const r = classifyPositive(citaSola(cita), { item_condition: "unopened", membership: "Plus" }, texto);
+  assert.equal(r.verdict, "YES_WITH_CONDITIONS");
+  assert.equal(r.pending, "account_status_unverifiable");
+});
+
+test("W26 LO QUE NO PUEDE ROMPER: los 4 del holdout siguen en YES", () => {
+  // Cada vez que aprieto la regla hay que volver a comprobar esto. Apretar de mas
+  // deshace el cambio entero y nos deja el campo YES muerto otra vez.
+  const casos = [
+    ["Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery. Items must be unopened and include all original accessories. Approved returns are refunded to the original payment method.",
+     "Items must be unopened and include all original accessories."],
+    ["Purchases made from November 1 through December 24 may be returned within 60 calendar days of the purchase date. Eligible merchandise receives a refund to the original payment method.",
+     "Purchases made from November 1 through December 24 may be returned within 60 calendar days of the purchase date."],
+    ["Physical software packages may be returned for a refund within 14 calendar days after delivery if the activation seal remains intact and the package has not been opened.",
+     "Physical software packages may be returned for a refund within 14 calendar days after delivery if the activation seal remains intact and the package has not been opened."],
+    ["Regular-price apparel may be returned for a refund within 30 calendar days after delivery when it is unworn and the original tags remain attached.",
+     "Regular-price apparel may be returned for a refund within 30 calendar days after delivery when it is unworn and the original tags remain attached."],
+  ];
+  for (const [texto, cita] of casos)
+    assert.equal(classifyPositive(citaSola(cita), { item_condition: "unopened" }, texto).verdict, "YES", cita.slice(0, 40));
+});
+
+test("W26 EL LÍMITE: 'gastos de envío no reembolsables' NO es cobrar por devolver", () => {
+  // C13 del banco propio. El envio original no se devuelve casi nunca y eso no
+  // cambia lo que el comprador recibe POR EL ARTICULO. Si esto disparara,
+  // habriamos convertido en condicional practicamente toda politica de internet.
+  const texto = "You may return unused items within 30 days of the delivery date for a full refund. Original shipping charges are non-refundable unless the item was defective.";
+  const cita = "You may return unused items within 30 days of the delivery date for a full refund.";
+  assert.equal(classifyPositive(citaSola(cita), { item_condition: "unopened" }, texto).verdict, "YES");
+});
