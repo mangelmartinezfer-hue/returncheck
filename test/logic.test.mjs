@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validateRequest, checkInvariants } from "../src/contract.mjs";
-import { applyDeadline, windowBasisFromClause, windowDaysFromClause } from "../src/decision.mjs";
+import { applyDeadline, windowBasisFromClause, windowDaysFromClause, missingInputFor, missingInputHint } from "../src/decision.mjs";
 import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
 import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
@@ -639,4 +639,59 @@ test("W18 LA OTRA MITAD: con fechas del comprador, el vencimiento sigue funciona
   assert.equal(resp.policy.merchant_return_days, 30);
   assert.equal(resp.policy.deadline_date, "2026-01-31");
   assert.equal(resp.verdict, "NO");
+});
+
+// ---------------------------------------------------------------------------
+// W21 — qué dato falta. Decisión de Miguel: nunca equivocarnos, pero que un
+// "no lo sé" diga también qué haría falta para saberlo.
+//
+// Lo que estas pruebas vigilan es que NO se invente nada: la tabla es
+// determinista, guardián -> campo. Un campo sugerido a la ligera es peor que
+// ninguno, porque el agente gasta otra llamada para nada.
+// ---------------------------------------------------------------------------
+
+test("W21 EL CASO QUE ABRE PUERTA: sin el estado del comprador, se pide el estado", () => {
+  const resp = { verdict: "UNKNOWN", policy: null,
+                 meta: { guard: { name: "jurisdiction_conditional" } } };
+  const falta = missingInputFor(resp, { buyer_country: "US" });
+  assert.deepEqual(falta, ["buyer_state"]);
+  assert.match(missingInputHint(falta), /buyer_state/);
+});
+
+test("W21: si el estado YA venia en la peticion, no se pide otra vez", () => {
+  // Pedir un dato que ya nos han dado hace que el producto parezca roto.
+  const resp = { verdict: "UNKNOWN", policy: null,
+                 meta: { guard: { name: "jurisdiction_conditional" } } };
+  assert.deepEqual(missingInputFor(resp, { buyer_state: "CA" }), []);
+});
+
+test("W21: vendedor tercero -> se pide su politica, no un dato del comprador", () => {
+  const resp = { verdict: "UNKNOWN", policy: null,
+                 meta: { guard: { name: "third_party_seller" } } };
+  assert.deepEqual(missingInputFor(resp, {}), ["seller_policy_text"]);
+});
+
+test("W21 MEDIA RESPUESTA: sabemos desde cuando cuenta la ventana pero no la fecha", () => {
+  // No es un UNKNOWN: respondimos. Pero sin fecha limite, para un agente de
+  // compras es media respuesta.
+  const resp = { verdict: "YES_WITH_CONDITIONS",
+                 policy: { window_basis: "delivery_date", merchant_return_days: 30 }, meta: {} };
+  assert.deepEqual(missingInputFor(resp, {}), ["delivery_date"]);
+  assert.deepEqual(missingInputFor(resp, { delivery_date: "2026-08-01" }), []);
+});
+
+test("W21 LO QUE NO PUEDE HACER: si el fallo es NUESTRO, no se pide nada al cliente", () => {
+  // clause_unsupported significa que no pudimos verificar la cita. Eso no lo
+  // arregla ningun dato del agente, y sugerirle uno seria mandarle a gastar otra
+  // llamada para nada.
+  const resp = { verdict: "UNKNOWN", policy: null,
+                 meta: { guard: { name: "clause_unsupported" } } };
+  assert.deepEqual(missingInputFor(resp, {}), []);
+  assert.equal(missingInputHint([]), null);
+});
+
+test("W21: una respuesta completa no lleva ningun campo extra", () => {
+  // Aditivo de verdad: quien ya integro no nota el cambio.
+  const resp = { verdict: "NO", policy: { window_basis: "purchase_date" }, meta: {} };
+  assert.deepEqual(missingInputFor(resp, { purchase_date: "2026-01-01" }), []);
 });
