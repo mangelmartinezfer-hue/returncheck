@@ -226,12 +226,30 @@ const CONDICIONES_CUBIERTAS = new Set(["unopened", "new"]);
  *
  * Devuelve { verdict, assumed_satisfied, pending } sin tocar `resp`.
  */
-export function classifyPositive(resp, req = {}) {
+// W25 — DÓNDE SE MIRA CADA FAMILIA. Corrige un fallo mío de W23 que el examen
+// destapó y mis pruebas NO: miraba las cuatro familias en la CITA, y una condición
+// de resultado casi nunca vive en la misma frase que el permiso.
+//
+//   "Products may be returned within 60 days."          <- lo que el modelo cita
+//   "Returns after 14 days receive store credit."       <- la condición, otra frase
+//
+// Mis pruebas pasaban porque yo metía las dos frases en una sola cadena. Texto
+// realista, montaje irreal. Por eso C07 y C16 respondían YES en producción con las
+// pruebas en verde.
+//
+// La regla correcta:
+//   · ESTADO FÍSICO -> se mira en la CITA. Es la condición pegada al permiso.
+//   · RESULTADO, ELEGIBILIDAD y PROCEDIMIENTO -> se miran en TODO el texto. Están
+//     donde el comercio quiera ponerlas.
+//
+// Ampliar la búsqueda solo puede llevar a YES_WITH_CONDITIONS, que es la respuesta
+// prudente. Se equivoca hacia el lado bueno.
+export function classifyPositive(resp, req = {}, policyText = null) {
   const v = resp && resp.verdict;
   if (v !== "YES" && v !== "YES_WITH_CONDITIONS") return null;
 
   const clause = (resp.evidence && resp.evidence.exact_clause) || "";
-  const contexto = clause + " " + ((resp.policy && resp.policy.raw_context) || "");
+  const contexto = String(policyText || "") + " " + clause;
 
   // 2 y 3: lo que nunca se da por cumplido. Manda sobre todo lo demás, y BAJA un
   // YES del modelo si hace falta.

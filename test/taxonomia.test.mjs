@@ -132,3 +132,57 @@ test("EL AGUJERO QUE ENCONTRÓ UNA PRUEBA VIEJA: 'con recibo' no lo entraña est
   assert.equal(r.verdict, "YES_WITH_CONDITIONS");
   assert.equal(r.pending, "procedure_unverifiable");
 });
+
+// ---------------------------------------------------------------------------
+// W25 — dónde se mira cada familia.
+//
+// ESTAS PRUEBAS NACEN DE UN FALLO MÍO QUE LAS PRUEBAS DE ARRIBA NO PILLARON.
+// Allí metí el permiso y la condición en UNA sola cadena y las llamé "cláusula".
+// El texto era realista; el montaje, no. En producción el modelo cita UNA frase, y
+// la condición de resultado vive casi siempre en otra. Por eso C07 y C16 salían
+// YES en el examen con las pruebas en verde.
+//
+// Aquí se separan a propósito: la cita por un lado, el texto completo por otro.
+// ---------------------------------------------------------------------------
+
+const citaSola = (clause) => ({
+  verdict: "YES_WITH_CONDITIONS",
+  evidence: { exact_clause: clause },
+  policy: { merchant_return_days: 60, return_category: "FiniteReturnWindow" },
+});
+
+test("W25 C16 REAL: el permiso en una frase, el vale de tienda en OTRA", () => {
+  const texto = "Returns. Unworn items with tags may be returned within 45 days. Returns made after 14 days receive store credit rather than a refund to the original payment method. Final sale items are not eligible.";
+  const cita = "Unworn items with tags may be returned within 45 days.";
+  // Mirando solo la cita, esto habria salido YES. Es lo que pasaba en produccion.
+  assert.equal(classifyPositive(citaSola(cita), { item_condition: "unopened" }).verdict, "YES");
+  // Con el texto completo, se ve la condicion y se responde con prudencia.
+  const r = classifyPositive(citaSola(cita), { item_condition: "unopened" }, texto);
+  assert.equal(r.verdict, "YES_WITH_CONDITIONS");
+});
+
+test("W25 C07 REAL: solo cambio, dicho en una frase distinta de la que se cita", () => {
+  const texto = "Damaged or Defective Items. If your item arrives damaged or defective, contact us within 15 days for a free replacement of the same item. Defective items are eligible for replacement only; cash refunds are not provided for defective merchandise.";
+  const cita = "If your item arrives damaged or defective, contact us within 15 days for a free replacement of the same item.";
+  const r = classifyPositive(citaSola(cita), { item_condition: "unopened" }, texto);
+  assert.equal(r.verdict, "YES_WITH_CONDITIONS");
+});
+
+test("W25 LO QUE NO PUEDE ROMPER: los 4 del holdout siguen siendo YES con su texto entero", () => {
+  // Ampliar la busqueda solo puede llevar a YES_WITH_CONDITIONS. Si se llevara por
+  // delante los 4 casos que justifican todo el cambio, no serviria de nada.
+  const casos = [
+    ["Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery. Items must be unopened and include all original accessories. Approved returns are refunded to the original payment method.",
+     "Items must be unopened and include all original accessories."],
+    ["Purchases made from November 1 through December 24 may be returned within 60 calendar days of the purchase date. Eligible merchandise receives a refund to the original payment method.",
+     "Purchases made from November 1 through December 24 may be returned within 60 calendar days of the purchase date."],
+    ["Physical software packages may be returned for a refund within 14 calendar days after delivery if the activation seal remains intact and the package has not been opened.",
+     "Physical software packages may be returned for a refund within 14 calendar days after delivery if the activation seal remains intact and the package has not been opened."],
+    ["Regular-price apparel may be returned for a refund within 30 calendar days after delivery when it is unworn and the original tags remain attached.",
+     "Regular-price apparel may be returned for a refund within 30 calendar days after delivery when it is unworn and the original tags remain attached."],
+  ];
+  for (const [texto, cita] of casos) {
+    const r = classifyPositive(citaSola(cita), { item_condition: "unopened" }, texto);
+    assert.equal(r.verdict, "YES", cita.slice(0, 40));
+  }
+});
