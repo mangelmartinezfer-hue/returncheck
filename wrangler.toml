@@ -25,7 +25,7 @@ ANSWER_LOG = "true"
 #     donde se ve el dinero entrar. Pero no hay ninguna clave privada en este
 #     proyecto: nosotros solo COBRAMOS, no firmamos ni movemos fondos.
 X402_ENABLED = "true"
-X402_NETWORK = "eip155:84532"                 # Base Sepolia (pruebas). Mainnet: eip155:8453
+X402_NETWORK = "eip155:8453"                  # Base MAINNET. Dinero real desde el 28 ago 2026.
 # La direccion de recepcion. Es PUBLICA por definicion: viaja en el reto de pago y
 # cualquiera puede ver su saldo y su historial en Basescan. Por eso es una cuenta
 # aparte, solo de ReturnCheck, y no la personal de Miguel.
@@ -35,12 +35,23 @@ X402_NETWORK = "eip155:84532"                 # Base Sepolia (pruebas). Mainnet:
 # en cada despliegue. Si viviera solo en el panel, el proximo deploy la vaciaria y
 # el servicio dejaria de anunciar precio sin que nadie se entere.
 X402_PAY_TO = "0xbF428071027402E9b0cE85e22146EDdc028cEB3b"
-X402_ASSET = "0x036CbD53842c5426634e7929541eC2318f3dCF7e"   # USDC en Base Sepolia
-# AL PASAR A MAINNET: hay que cambiar X402_NETWORK a eip155:8453 y X402_ASSET al
-# USDC oficial de Base mainnet. Esa direccion NO se pone de memoria: se verifica
-# contra la fuente oficial de Circle o de Base antes de tocarla. Un token
-# equivocado aqui es cobrar en una moneda que no existe.
-X402_ASSET_NAME = "USDC"
+X402_ASSET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"   # USDC oficial en Base mainnet
+# PROCEDENCIA DE ESTA DIRECCION, porque no se pone de memoria: documentacion
+# oficial de Circle (developers.circle.com/stablecoins/usdc-contract-addresses),
+# leida el 28 ago 2026. En esa misma pagina figura la de Base Sepolia, que
+# coincidia caracter a caracter con la que teniamos: eso valida la fuente ademas
+# del dato. Confirmado luego contra la propia cadena (chainId 8453): symbol USDC,
+# 6 decimales.
+#
+# EL VALOR QUE CASI SE NOS COLA. El nombre va al dominio EIP-712 con el que firma
+# el comprador; si no coincide con el del token, la firma no valida y NINGUN pago
+# entra. Y no es el mismo en las dos redes:
+#     Base Sepolia  ->  name() = "USDC"
+#     Base mainnet  ->  name() = "USD Coin"
+# Leido de los dos contratos el 28 ago 2026. Con "USDC" aqui, mainnet no cobraria
+# nada y no habria ningun error que lo explicase: falla cerrado, en silencio.
+X402_ASSET_NAME = "USD Coin"
+# La version del dominio EIP-712, leida del contrato: "2" en las dos redes.
 X402_ASSET_VERSION = "2"
 X402_TIMEOUT_SECONDS = "60"
 # El FACILITADOR es quien nos dice si un pago es real. Eleccion pendiente para
@@ -48,9 +59,10 @@ X402_TIMEOUT_SECONDS = "60"
 # diciendo "pagado" nos haria regalar respuestas. Para la red de pruebas da igual,
 # el dinero es de mentira. Sin esto configurado, x402 no cobra ni sirve: falla
 # cerrado a proposito.
-# Mogami v2. Comprobado el 28 ago 2026 contra su propio /supported, no contra su
-# web: declara x402Version 2, esquema "exact", y las dos redes que nos importan
-# (eip155:84532 Sepolia y eip155:8453 mainnet). Sin cuenta, sin clave, sin comision.
+# Mogami v2. Vuelto a comprobar contra su propio /supported el 28 ago 2026, ya con
+# mainnet encendido: declara x402Version 2, esquema "exact", y eip155:8453.
+# Sin cuenta, sin clave, sin comision — segun ellos. Esa gratuidad es politica
+# suya y puede cambiar; es un riesgo de negocio, no un fallo tecnico.
 #
 # Se eligio frente al de x402.org por un motivo concreto: Mogami declara la version
 # en la URL (v2. frente a v1.). Nosotros somos estrictamente v2 y esa ambiguedad es
