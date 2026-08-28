@@ -10,7 +10,7 @@
 // cuele en la base nada que prometimos no guardar.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sanitizeUrl, recordAnswer, markAnswerCharged, findAnswers, purgeExpiredAnswers } from "../src/answerlog.mjs";
+import { sanitizeUrl, recordAnswer, markAnswerCharged, findAnswers, purgeExpiredAnswers, pendingSettlements } from "../src/answerlog.mjs";
 
 // Base falsa mínima: guarda las filas y sabe leerlas.
 function db() {
@@ -209,3 +209,39 @@ test("W22 EL EXAMEN NO ENSUCIA EL REGISTRO: una pasada de /eval no deja ni una f
   await recordAnswer({ DB }, { resp: RESP, req: REQ, build: "w22" });
   assert.equal(DB._f.length, 1);
 });
+
+// ---------------------------------------------------------------------------
+// W44 — la lista de conciliación
+//
+// El 27 de agosto una liquidación venció el plazo, la anotamos como "no cobrada"
+// y el dinero SÍ había llegado. W41 arregló la anotación —tres estados, y `null`
+// cuando no se sabe— pero dejó la lista sin puerta: se podía escribir el estado
+// "sin resolver" y no había forma de preguntar cuántos había.
+// ---------------------------------------------------------------------------
+
+test("W44: la lista de conciliación saca lo que quedó SIN RESOLVER", async () => {
+  const filas = [
+    { id: "a", answered_at: "2026-08-27T17:33:00Z", merchant_domain: "x.example",
+      verdict: "YES", charged: null, price_usd: 0.02 },   // sin resolver -> SI
+    { id: "b", answered_at: "2026-08-27T17:45:00Z", merchant_domain: "x.example",
+      verdict: "YES", charged: 1, price_usd: 0.02 },      // cobrado -> no
+    { id: "c", answered_at: "2026-08-27T17:46:00Z", merchant_domain: "x.example",
+      verdict: "UNKNOWN", charged: 0, price_usd: 0 },     // no cobrado -> no
+    { id: "d", answered_at: "2026-08-27T17:47:00Z", merchant_domain: "x.example",
+      verdict: "YES", charged: null, price_usd: 0 },      // sin precio -> no
+  ];
+  const env = { DB: dbConSelect(filas.filter((f) => f.charged === null && f.price_usd > 0)) };
+  const r = await pendingSettlements(env);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].id, "a");
+});
+
+test("W44: si la base falla, devuelve lista vacía y NO revienta", async () => {
+  // Una consulta de conciliacion que lanza excepcion tumbaria el panel entero.
+  const env = { DB: { prepare: () => { throw new Error("base caida"); } } };
+  assert.deepEqual(await pendingSettlements(env), []);
+});
+
+function dbConSelect(filas) {
+  return { prepare: () => ({ bind: () => ({ all: async () => ({ results: filas }) }) }) };
+}

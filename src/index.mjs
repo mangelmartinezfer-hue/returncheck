@@ -20,7 +20,7 @@ import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
 import { corpusStats, deleteMerchantCorpus, sha256full } from "./corpus.mjs";
 import { addWatch, removeWatch, listWatches, changesFor } from "./watch.mjs";
-import { findAnswers, answerStats, markAnswerCharged, purgeExpiredAnswers, deleteClientAnswers } from "./answerlog.mjs";
+import { findAnswers, answerStats, markAnswerCharged, purgeExpiredAnswers, deleteClientAnswers, pendingSettlements } from "./answerlog.mjs";
 import { x402Activo, retoDePago, leerFirmaDePago, meterEnSobre, cabeceraLiquidacion } from "./x402.mjs";
 import { verificarPago, liquidarPago, veredictoCobrable } from "./facilitador.mjs";
 import { leerIdentificador, huella, consultar as consultarIdem, guardar as guardarIdem } from "./idempotencia.mjs";
@@ -1028,6 +1028,26 @@ export default {
           build: BUILD,
           usar_navegador: body.usar_navegador === true,
           resumen: resumir(filas),
+          filas,
+        });
+      }
+      // W44 — LA LISTA DE CONCILIACION. En W41 escribi `pendingSettlements` y no la
+      // deje alcanzable desde ningun sitio: una funcion de conciliacion que no se
+      // puede consultar no concilia nada.
+      //
+      // Devuelve las respuestas cuyo cobro quedo SIN RESOLVER (`charged IS NULL`
+      // con precio puesto): se lanzo la liquidacion y no llego confirmacion. Cada
+      // una se cierra mirando la cadena — el dinero llego o no llego, y eso es
+      // comprobable. Sin esta lista habria que adivinarlo.
+      if (request.method === "GET" && p === "/admin/settlements") {
+        if (!adminOk(request, url, env)) return errorResponse("UNAUTHORIZED", "Admin key required.", 401);
+        const filas = await pendingSettlements(env, url.searchParams.get("limit") || 100);
+        return json({
+          pendientes: filas.length,
+          importe_total_usd: Math.round(filas.reduce((a, f) => a + (f.price_usd || 0), 0) * 10000) / 10000,
+          nota: filas.length
+            ? "Cobros lanzados sin confirmacion. Se concilian mirando la cadena por su transaccion."
+            : "Nada pendiente de conciliar.",
           filas,
         });
       }
