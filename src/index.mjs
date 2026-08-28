@@ -637,16 +637,65 @@ async function handleSignup(request, env) {
 //   7. Guardar para el reintento
 // ---------------------------------------------------------------------------
 
+/**
+ * La puerta humana del 402.
+ *
+ * EL PROBLEMA QUE ARREGLA. Al encender x402 le abrimos la puerta al agente y, sin
+ * darnos cuenta, se la cerramos a la persona. El 402 pasó a decir solo «Free trial
+ * exhausted. Payment required.» y un objeto `accepts` que un desarrollador no sabe
+ * usar — mientras que el camino que SÍ puede usar (darse de alta y llevarse crédito
+ * gratis) dejó de mencionarse. Existía, estaba pagado, y no se veía.
+ *
+ * Un 402 que no dice cómo seguir es un callejón sin salida con otro número.
+ */
+function puertaHumana(env) {
+  const base = env.PUBLIC_BASE_URL || "";
+  const precio = Number(env.PRICE_USD || "0.02");
+  const credito = Number(env.SIGNUP_FREE_CREDIT_USD || "2.00");
+  const porIp = Number(env.FREE_IP_DAILY || "3");
+  const salida = {
+    message:
+      "If you are a human developer: the keyless free trial is " + porIp +
+      " calls per IP per day and it resets daily. For more, sign up — it comes with free credit.",
+    free_trial: { calls_per_ip_per_day: porIp, resets: "daily (UTC)" },
+    signup: {
+      url: base ? base + "/v1/signup" : "/v1/signup",
+      method: "POST",
+      body: { email: "you@example.com" },
+      free_credit_usd: credito,
+      approx_free_calls: precio > 0 ? Math.floor(credito / precio) : null,
+    },
+    price_usd_per_call: precio,
+    unknown_is_free: true,
+  };
+  // HONESTIDAD SOBRE LA RED. Mientras x402 apunte a una red de pruebas, el `accepts`
+  // pide una moneda que no vale dinero. Un agente lo deduce del identificador de
+  // red; una persona, no. Se dice.
+  const red = String(env.X402_NETWORK || "");
+  if (red === "eip155:84532" || /sepolia|testnet/i.test(red)) {
+    salida.x402_note =
+      "x402 payment is currently configured on a TEST network (" + red +
+      "), so it cannot move real money. For real payment use the signup path above.";
+  }
+  return salida;
+}
+
 /** El reto de pago: 402 con el sobre PAYMENT-REQUIRED. */
 function reto402(env, request, motivo) {
   const reto = retoDePago(env, { url: request.url, error: motivo });
   // Sin configuracion no se anuncia precio: se cae al 402 educado de siempre.
   if (!reto) return educated402(env, "Payment is required and x402 is not fully configured on this server.");
-  return new Response(JSON.stringify(reto), {
+  // OJO CON EL ORDEN: el SOBRE lleva el reto TAL CUAL, sin nuestro añadido. Lo que
+  // viaja en la cabecera es contrato con el agente y con el facilitador, y ahí no
+  // se mete nada que ellos no esperen. La puerta humana va SOLO en el cuerpo, donde
+  // un campo de más es inofensivo para quien no lo mira.
+  const sobre = meterEnSobre(reto);
+  const cuerpo = { ...reto, human_next_steps: puertaHumana(env) };
+  return new Response(JSON.stringify(cuerpo), {
     status: 402,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "PAYMENT-REQUIRED": meterEnSobre(reto),
+      "PAYMENT-REQUIRED": sobre,
       "access-control-allow-origin": "*",
     },
   });
