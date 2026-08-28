@@ -11,14 +11,30 @@ import { freeTrial } from "./freetier.mjs";
 
 const DEFAULT_PROTOCOL = "2025-06-18";
 
-const TOOL = {
+export const TOOL = {
   name: "check_return",
+  // W43 — LO QUE LEE UN AGENTE ANTES DE DECIDIR SI NOS LLAMA.
+  //
+  // Hasta hoy esto decia "manda una URL" y dejaba `page_text` como opcional, el
+  // ultimo de la lista. La medicion del 28 de agosto sobre 50 tiendas reales dice
+  // que por esa via acertamos 17 de 50. Prometer lo que fallamos dos de cada tres
+  // veces es la forma mas cara de perder a un agente: la primera llamada se gasta
+  // una sola vez.
+  //
+  // Se invierte el orden y se publica la cobertura MEDIDA, con su fecha. Es lo
+  // mismo que le exigimos al motor: no afirmar mas de lo que sostiene la evidencia.
   description:
     "Answer one question: can this specific product actually be returned? " +
-    "Send a product URL, buyer country and (optional) item condition, and get a " +
-    "verified verdict — YES / YES_WITH_CONDITIONS / NO / UNKNOWN — with the exact " +
-    "policy clause quoted verbatim, source URL, return window/deadline, fees and a " +
-    "confidence score. Never invents: returns UNKNOWN instead of guessing.",
+    "BEST RESULTS: send the product page you already have as page_text (or page_html) " +
+    "along with product_url — your browser renders JavaScript and is not blocked by " +
+    "retailers, so this works on any store and is faster. Without it we fetch the page " +
+    "ourselves and reach the policy for about 1 in 3 US retailers (17 of 50 measured " +
+    "2026-08-28; mostly Shopify and direct-to-consumer brands — large retailers and " +
+    "marketplaces block server-side reads). " +
+    "You get a verified verdict — YES / YES_WITH_CONDITIONS / NO / UNKNOWN — with the " +
+    "exact policy clause quoted verbatim, source URL, return window/deadline, fees and " +
+    "a confidence score. Never invents: returns UNKNOWN instead of guessing, and " +
+    "UNKNOWN is free.",
   inputSchema: {
     type: "object",
     properties: {
@@ -30,8 +46,8 @@ const TOOL = {
       delivery_date: { type: "string", description: "YYYY-MM-DD (optional; preferred for the deadline)." },
       merchant: { type: "string" },
       seller_name: { type: "string" },
-      page_html: { type: "string", description: "Optional: raw HTML of the page you already have. If provided, ReturnCheck verifies against it instead of fetching — best coverage, bypasses sites that block server-side reads. Still never invents: no verifiable clause -> UNKNOWN." },
-      page_text: { type: "string", description: "Optional: plain text of the page (alternative to page_html)." },
+      page_text: { type: "string", description: "RECOMMENDED. Plain text of the product or returns page you already have open. We verify against this instead of fetching: works on any store, no blocking, no JavaScript problem, and faster. Still never invents: no verifiable clause -> UNKNOWN (free)." },
+      page_html: { type: "string", description: "RECOMMENDED (alternative to page_text). Raw HTML of the same page. Slightly better than page_text: we can also read structured data (JSON-LD) from it." },
     },
     required: ["product_url", "buyer_country"],
   },
