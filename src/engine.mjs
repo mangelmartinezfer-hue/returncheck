@@ -45,7 +45,7 @@ function withTimeout(promise, ms, code, message) {
 // Lee el texto de la política. HÍBRIDO: 1) fetch plano rápido; 2) si falla o
 // la página es una cáscara JS, usa el navegador headless (más lento).
 // Devuelve { text, via, fetch_ms } y NUNCA se cuelga: cada etapa lleva timeout.
-async function fetchPolicyText(env, url) {
+export async function fetchPolicyText(env, url, diag = null) {
   const t = Date.now();
   // 1) Intento rápido: petición HTTP normal (con timeout).
   try {
@@ -62,16 +62,22 @@ async function fetchPolicyText(env, url) {
       }),
       T_PLAIN_FETCH, "UPSTREAM_TIMEOUT", "Plain fetch timed out."
     );
+    // W42 — la sonda de adquisicion apunta aqui los hechos crudos. `diag` es
+    // opcional y solo lo pasa /admin/adquisicion: sin el, esta funcion se
+    // comporta exactamente igual que antes. Se mide el camino REAL, no una copia.
+    if (diag) { diag.http_status = res.status; diag.ok = res.ok; }
     if (res.ok) {
       const html = (await res.text()).slice(0, MAX_HTML_BYTES); // cap antes de procesar
       const text = htmlToText(html);
+      if (diag) { diag.html_bytes = html.length; diag.text_chars = text.length;
+                  diag.policy_hits = policyKeywordHits(text); }
       // El fetch funcionó: devolvemos SIEMPRE el HTML aunque el texto sea pobre.
       // Así, si la página de producto es una cáscara JS, el descubrimiento de la
       // página de devoluciones (que suele ser HTML estático) puede seguir adelante.
       // El navegador solo se usa si el fetch falla del todo (abajo).
       return { text: focusPolicyText(text), via: "structured_data", fetch_ms: Date.now() - t, html };
     }
-  } catch (_) { /* seguimos al navegador */ }
+  } catch (e) { if (diag) diag.fetch_error = (e && (e.code || e.name)) || "fetch_failed"; }
 
   // 2) Fallback: navegador headless para páginas con mucho JavaScript.
   //    Apagado por defecto (evita cuelgues/latencia). Se activa con USE_BROWSER="true".
@@ -88,6 +94,11 @@ async function fetchPolicyText(env, url) {
     })(), T_BROWSER, "UPSTREAM_TIMEOUT", "Headless browser timed out.");
     return { text: focusPolicyText(text.replace(/\s+\n/g, "\n")), via: "page_parse", fetch_ms: Date.now() - t };
   } catch (e) {
+    // W42 — el motivo CRUDO del navegador, para la sonda. Sin esto, un binding de
+    // navegador no disponible en el plan y una pagina lenta son indistinguibles:
+    // la pasada "con navegador" saldria igual que la de "sin" y la leeriamos como
+    // "el navegador no ayuda", cuando en realidad no se habria llegado a usar.
+    if (diag) diag.browser_error = (e && (e.message || e.name)) || "browser_failed";
     if (e instanceof EngineError) throw e;
     throw new EngineError("UPSTREAM_TIMEOUT", 504, "Could not load the product/policy page in time.");
   } finally {
@@ -122,7 +133,7 @@ async function fetchPlain(env, url) {
 // producto no trae la política. Prueba primero los enlaces del propio HTML (mejor
 // señal) y luego rutas comunes de Shopify/tiendas. Acotado a DISCOVERY_MAX_TRIES.
 // Devuelve la MEJOR página encontrada { text, html, url, hits } o null.
-async function discoverPolicyPage(env, productUrl, productHtml) {
+export async function discoverPolicyPage(env, productUrl, productHtml) {
   const linked = policyLinkCandidates(productHtml || "", productUrl);
   const guessed = guessedPolicyUrls(productUrl);
   const seen = new Set([productUrl]);

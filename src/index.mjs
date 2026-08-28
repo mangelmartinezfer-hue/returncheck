@@ -25,6 +25,7 @@ import { x402Activo, retoDePago, leerFirmaDePago, meterEnSobre, cabeceraLiquidac
 import { verificarPago, liquidarPago, veredictoCobrable } from "./facilitador.mjs";
 import { leerIdentificador, huella, consultar as consultarIdem, guardar as guardarIdem } from "./idempotencia.mjs";
 import { inferenceParams } from "./prompt.mjs";
+import { sondearTanda, resumir } from "./adquisicion.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
 
@@ -970,6 +971,43 @@ export default {
         const body = await request.json().catch(() => ({}));
         if (body && body.client_ref) return json(await deleteClientAnswers(env, body.client_ref));
         return json(await purgeExpiredAnswers(env));
+      }
+      // W42 — LA SONDA DE ADQUISICIÓN. ¿Sabemos leer una tienda real?
+      //
+      // Es la única capa del sistema sin instrumentar, y de ella depende que haya
+      // producto: todas nuestras cifras se miden sobre texto que le damos nosotros
+      // al motor por `page_text`.
+      //
+      // NO llama al modelo, NO emite veredicto, NO escribe en el corpus, NO cobra
+      // y NO toca la caché. Coste: cero.
+      //
+      // POR TANDAS a propósito: cincuenta URLs seguidas, cada una con hasta cuatro
+      // peticiones y sus plazos, se saldrían del presupuesto de un worker. Se
+      // llama cinco veces de diez en diez, y las tandas se juntan fuera.
+      if (request.method === "POST" && p === "/admin/adquisicion") {
+        if (!adminOk(request, url, env)) return errorResponse("UNAUTHORIZED", "Admin key required.", 401);
+        const body = await request.json().catch(() => null);
+        const urls = body && Array.isArray(body.urls) ? body.urls : null;
+        if (!urls || !urls.length)
+          return errorResponse("INVALID_INPUT", "urls must be a non-empty array.", 400);
+        if (urls.length > 12)
+          return errorResponse("INVALID_INPUT", "Max 12 urls per batch (worker subrequest budget).", 400);
+        for (const u of urls)
+          if (typeof u !== "string" || !/^https?:\/\//i.test(u))
+            return errorResponse("INVALID_INPUT", `Not an http(s) url: ${u}`, 400);
+
+        // El navegador se enciende SOLO para esta llamada si se pide, sin tocar la
+        // configuración desplegada: así se puede medir apagado y encendido el mismo
+        // día sin dos despliegues, y sin cambiarle la latencia a nadie más.
+        const entorno = body.usar_navegador === true ? { ...env, USE_BROWSER: "true" } : env;
+
+        const filas = await sondearTanda(entorno, urls);
+        return json({
+          build: BUILD,
+          usar_navegador: body.usar_navegador === true,
+          resumen: resumir(filas),
+          filas,
+        });
       }
       if (request.method === "GET" && p === "/admin/corpus") {
         if (!adminOk(request, url, env)) return errorResponse("INVALID_INPUT", "Not found.", 404);
