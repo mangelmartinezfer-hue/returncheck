@@ -18,3 +18,9 @@ contraseñas/
 
 returncheck-pruebas/
 comprador.txt
+
+# W47 — volcados del corpus. Una consulta a policy_corpus sobre datos reales
+# saca texto de politicas de comercios; eso no entra en git ni por accidente.
+corpus.json
+corpus*.json
+*-corpus.json
