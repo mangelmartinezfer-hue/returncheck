@@ -117,3 +117,30 @@ binding = "BROWSER"
 #   wrangler secret put STRIPE_SECRET_KEY
 #   wrangler secret put STRIPE_WEBHOOK_SECRET
 # Los lee el código como env.STRIPE_SECRET_KEY / env.STRIPE_WEBHOOK_SECRET
+
+# --- W47: observabilidad. VA AQUI Y NO EN EL PANEL, a proposito.
+#     Lo que se activa desde el panel NO sobrevive al siguiente despliegue:
+#     `wrangler deploy` manda la configuracion de este fichero y, si aqui no
+#     dice nada de observabilidad, la deja apagada. Eso explica por que
+#     llevabamos dias dandola por activa con los registros vacios.
+#     Escrita aqui, se vuelve a aplicar en cada despliegue.
+#
+#     head_sampling_rate = 1 es el 100% de las invocaciones: no se descarta
+#     ninguna. Es lo que queremos mientras el volumen sea el que es; si algun
+#     dia el trafico lo hace caro, este es el numero que se baja.
+#
+#     NOTA sobre lo que NO esta aqui: `traces` y `persist` NO existen en el
+#     esquema de configuracion de wrangler (comprobado: `deploy --dry-run`
+#     responde 'Unexpected fields found in observability field:
+#     "persist","traces"' y los ignora). Escribirlas daria la falsa sensacion
+#     de haberlas activado, que es justo el error que este bloque corrige.
+#     La persistencia entre despliegues se consigue por estar en este fichero,
+#     no por una clave.
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
