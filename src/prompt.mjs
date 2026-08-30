@@ -4,7 +4,28 @@
 // Modelo por defecto: RÁPIDO (8B) — ~2s y en pruebas elige bien la cláusula.
 // La corrección la blindan clauseInText (la cita existe, por tramo literal) +
 // clauseSupportsVerdict (la cita respalda el veredicto). Se puede sobrescribir
-// desde Cloudflare con la variable AI_MODEL (p.ej. probar 70B) sin tocar código.
+// desde Cloudflare con la variable AI_MODEL sin tocar código.
+//
+// W47 — EL 70B YA SE PROBÓ Y SE DESCARTÓ (30 ago 2026). No lo repitas sin leer
+// esto. Se midió @cf/meta/llama-3.3-70b-instruct-fp8-fast contra el holdout de
+// 25 casos y se paró en la PRIMERA pasada con unsafe_errors = 1.
+//
+// El caso fue RC25-17: respondió YES donde el esperado es YES_WITH_CONDITIONS,
+// perdiendo por el camino la condición "only when the retail seal is unbroken".
+// Los días (14) y la base (delivery_date) los acertó, y la cita era correcta y
+// estaba en la página; lo que se dejó fue la CONDICIÓN. Con el 8B ese mismo caso
+// se abstiene 5 de 5 por el guard negative_clause_wrong_condition. Es decir: el
+// 70B convierte una abstención segura en una afirmación a la que le falta una
+// condición, que es exactamente lo que este producto no puede hacer.
+//
+// SE DESCARTÓ POR ESO, NO POR COSTE NI POR LATENCIA. La latencia se midió y no
+// era el problema: ~3x más lento (mediana 5119 ms frente a 1693 ms del 8B), pero
+// el peor caso (7373 ms) se queda a menos de la mitad del techo T_AI de 18000 ms,
+// con cero timeouts. La cobertura además bajó de 68% a 56%.
+//
+// El criterio que lo descarta es unsafe_errors = 0 en la PEOR pasada. Fallo en la
+// primera, así que no se corrieron las otras cuatro: no hace falta saber si es
+// sistemático, porque la cobertura no compensa un error peligroso.
 export const AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fast";
 
 // W05 — PARÁMETROS DE INFERENCIA. Aquí estaba el agujero.
