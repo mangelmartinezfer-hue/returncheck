@@ -115,6 +115,7 @@ async function handleEval(request, env, url) {
     };
     let got = "ERROR", policyDays = null, clause = null, hallucination = false, err = null;
     let via = null, degrade = null, fromCandidate = null, guard = null, reason = null;
+    let aiMs = null, responseMs = null;   // W47: latencia, para vigilar el techo T_AI
     let gotBasis = null, gotDeadline = null;
     try {
       const resp = await runCheck(env, req);
@@ -124,6 +125,12 @@ async function handleEval(request, env, url) {
       gotDeadline = resp.policy ? (resp.policy.deadline_date ?? null) : null;
       clause = resp.evidence ? resp.evidence.exact_clause : null;
       via = resp.meta ? resp.meta.checked_via : null;
+      // W47 — latencia de la llamada al modelo. El motor corta a T_AI (18 s) y una
+      // llamada que se pasa devuelve null, que acaba en UNKNOWN. Sin este numero
+      // un timeout es indistinguible de una abstencion honesta, y al comparar
+      // modelos mas lentos (70B) eso es justo lo que hay que poder distinguir.
+      aiMs = resp.meta && typeof resp.meta.ai_ms === "number" ? resp.meta.ai_ms : null;
+      responseMs = resp.meta && typeof resp.meta.response_ms === "number" ? resp.meta.response_ms : null;
       degrade = resp.meta && resp.meta.degrade ? resp.meta.degrade : null; // por qué se degradó a UNKNOWN
       // W05 — de dónde salió la cita. Sin este dato no se puede distinguir si la
       // mejora del 25 ago vino de ENSEÑAR la lista numerada al modelo o de
@@ -172,6 +179,7 @@ async function handleEval(request, env, url) {
         : null,
       guard: guard ? guard.name : null,
       guard_rejected_clause: guard ? guard.rejected_clause : null,
+      ai_ms: aiMs, response_ms: responseMs,
       reason,
       hallucination, errorType, via, degrade, error: err, note: c.note,
     });
@@ -212,8 +220,26 @@ async function handleEval(request, env, url) {
     guards[k] = (guards[k] || 0) + 1;
   }
   const rescued = results.filter(r => r.clause_from_candidate === true).length;
-  const cited = results.filter(r => r.cited_clause).length;
+  // W47 — latencia del modelo. El motor corta la llamada a T_AI = 18000 ms; pasado
+  // eso devuelve null y el caso acaba en UNKNOWN. Al comparar un modelo mas lento
+  // (70B) hace falta ver no solo la media sino la COLA: un p95 comodo con un
+  // maximo pegado al techo significa que ya estamos perdiendo casos por tiempo.
+  const T_AI_CEILING = 18000;
+  const lat = results.map(r => r.ai_ms).filter(v => typeof v === "number").sort((a, b) => a - b);
   const pct = (a, b) => b ? Math.round((a / b) * 1000) / 10 : 0;
+  const quant = (q) => lat.length ? lat[Math.min(lat.length - 1, Math.floor(q * lat.length))] : null;
+  const latency = {
+    ceiling_ms: T_AI_CEILING,
+    n: lat.length,
+    min_ms: lat.length ? lat[0] : null,
+    median_ms: quant(0.5),
+    p95_ms: quant(0.95),
+    max_ms: lat.length ? lat[lat.length - 1] : null,
+    avg_ms: lat.length ? Math.round(lat.reduce((a, b) => a + b, 0) / lat.length) : null,
+    over_80pct_ceiling: lat.filter(v => v >= T_AI_CEILING * 0.8).length,
+    at_or_over_ceiling: lat.filter(v => v >= T_AI_CEILING).length,
+  };
+  const cited = results.filter(r => r.cited_clause).length;
 
   return json({
     exam: "blind-v2",
@@ -236,6 +262,7 @@ async function handleEval(request, env, url) {
     // cuántas respuestas llegaron a citar algo. 0/N y N/N significan cosas muy
     // distintas y hasta ahora el banco no lo decía.
     clauses_rescued_by_candidate: rescued,
+    latency,
     clauses_cited: cited,
     unknown_breakdown: guards,               // W11: quién abstuvo — cada guard por su nombre, y el modelo por el suyo
     // W06 — la MISMA tanda puntuada de las dos maneras. Estricta arriba, operativa aquí.
