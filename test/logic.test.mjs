@@ -8,7 +8,8 @@ import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POL
          policyKeywordHits, policyLinkCandidates, guessedPolicyUrls,
          clauseIsJurisdictionConditional, policyDefersToSeller,
          clausePositiveButUnverifiedForOpenedItem,
-         evidenceContext, splitSentences } from "../src/text.mjs";
+         evidenceContext, splitSentences,
+         stripCandidateIndexPrefix, reconcileDays } from "../src/text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "../src/jsonld.mjs";
 import { assembleFromJsonLd } from "../src/engine.mjs";
 
@@ -694,4 +695,89 @@ test("W21: una respuesta completa no lleva ningun campo extra", () => {
   // Aditivo de verdad: quien ya integro no nota el cambio.
   const resp = { verdict: "NO", policy: { window_basis: "purchase_date" }, meta: {} };
   assert.deepEqual(missingInputFor(resp, { purchase_date: "2026-01-01" }), []);
+});
+
+// ---------- Doc 65 Hallazgo B: el "[n] " de la lista de candidatas no es del comercio ----------
+
+test("stripCandidateIndexPrefix quita el prefijo '[2] ' que a veces copia el modelo", () => {
+  const conPrefijo = "[2] They must be returned in person to a Factory Outlet location.";
+  assert.equal(
+    stripCandidateIndexPrefix(conPrefijo),
+    "They must be returned in person to a Factory Outlet location."
+  );
+});
+
+test("stripCandidateIndexPrefix no toca una cita que no lleva el prefijo", () => {
+  const limpia = "Opened hygiene products are not eligible for return.";
+  assert.equal(stripCandidateIndexPrefix(limpia), limpia);
+});
+
+test("stripCandidateIndexPrefix no toca un corchete que no es el patrón [n] ", () => {
+  const rara = "[Note] Returns require a receipt.";
+  assert.equal(stripCandidateIndexPrefix(rara), rara);
+});
+
+test("stripCandidateIndexPrefix con null/vacío no revienta", () => {
+  assert.equal(stripCandidateIndexPrefix(null), null);
+  assert.equal(stripCandidateIndexPrefix(""), "");
+});
+
+// ---------- Doc 65 Hallazgo A: la cita manda sobre el número que dio el modelo ----------
+// Casos reales del holdout (RC25-07 y RC25-21): la cita era la correcta, estaba en
+// la página, hablaba de devoluciones y contenía el "7" esperado. El único fallo
+// posible era que el modelo escribiera un merchant_return_days distinto de 7.
+
+test("reconcileDays (RC25-07): el modelo dice 14, la cita dice 7 -> gana la cita", () => {
+  const clause =
+    "Items damaged in transit qualify for a refund or replacement only when the " +
+    "customer contacts support within 7 calendar days after delivery and provides " +
+    "photographs of the shipping box and damaged item.";
+  assert.equal(reconcileDays(clause, clause, 14), 7);
+});
+
+test("reconcileDays (RC25-21): el 7 está en la frase, el modelo dice 30 -> gana la cita", () => {
+  const page =
+    "Outlet purchases may be returned within 7 calendar days of purchase. " +
+    "They must be returned in person to a Factory Outlet location with the receipt and original packaging.";
+  const clause = "Outlet purchases may be returned within 7 calendar days of purchase.";
+  assert.equal(reconcileDays(clause, page, 30), 7);
+});
+
+test("reconcileDays: el 7 está solo en la frase vecina (misma ventana que W04) -> igual reconcilia", () => {
+  const clause = "They must be returned in person to a Factory Outlet location with the receipt and original packaging.";
+  assert.equal(reconcileDays(clause, OUTLET_TEXT, 30), 7);
+});
+
+test("reconcileDays: con DOS cifras en la ventana, no decide por el modelo (se conserva la suya)", () => {
+  const page = "Standard items ship in 2 days. Returns are accepted within 30 calendar days of delivery.";
+  const clause = "Returns are accepted within 30 calendar days of delivery.";
+  // La ventana (±1 frase) trae "2" y "30": ambiguo, así que no se toca lo que dio el modelo.
+  assert.equal(reconcileDays(clause, page, 45), 45);
+});
+
+test("reconcileDays: sin ninguna cifra en la ventana, conserva el número del modelo", () => {
+  const clause = "Eligible merchandise receives a refund to the original payment method.";
+  assert.equal(reconcileDays(clause, clause, 60), 60);
+});
+
+test("reconcileDays: clause vacía no revienta, conserva el número del modelo", () => {
+  assert.equal(reconcileDays("", "algo", 10), 10);
+  assert.equal(reconcileDays(null, "algo", 10), 10);
+});
+
+test("Hallazgo A end-to-end: clauseSupportsVerdict acepta tras reconciliar el número mal dado", () => {
+  // Antes del fix: con days=14 (el número equivocado del modelo), la cita se rechazaba
+  // aunque fuera la correcta -- exactamente el fallo diagnosticado en doc 65.
+  const clause =
+    "Items damaged in transit qualify for a refund or replacement only when the " +
+    "customer contacts support within 7 calendar days after delivery and provides " +
+    "photographs of the shipping box and damaged item.";
+  assert.equal(clauseSupportsVerdict(clause, {
+    verdict: "YES_WITH_CONDITIONS", days: 14, policyText: clause,
+  }), false);
+  // Con el número reconciliado (7, el que de verdad dice la cita), pasa.
+  const dias = reconcileDays(clause, clause, 14);
+  assert.equal(clauseSupportsVerdict(clause, {
+    verdict: "YES_WITH_CONDITIONS", days: dias, policyText: clause,
+  }), true);
 });

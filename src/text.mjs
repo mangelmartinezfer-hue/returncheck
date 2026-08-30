@@ -226,6 +226,32 @@ export function clauseSupportsVerdict(clause, { verdict, days, category, policyT
   return true;
 }
 
+// Hallazgo A (doc 65) — la cita manda sobre el número que dio el modelo, y no al
+// revés. Diagnosticado sobre RC25-07 y RC25-21: la cita citada era la correcta,
+// estaba en la página, hablaba de devoluciones y contenía el "7" esperado — el
+// único camino de fallo que quedaba era que el modelo hubiese escrito un
+// `merchant_return_days` distinto de lo que dice su propia cita. El guardián
+// hacía bien su trabajo rechazando esa cita; el error era de origen, no de guardia.
+//
+// Mover la decisión del modelo al código (principio del proyecto): si la
+// ventana de la cita contiene una cifra de días, esa cifra es la evidencia que
+// vendemos — el número que tecleó el modelo no es evidencia de nada.
+//
+// Condición de seguridad que no se negocia: solo se reconcilia si la ventana
+// contiene EXACTAMENTE una cifra de días. Con dos ("7 calendar days… 30-day
+// warranty") seguimos sin decidir por el modelo: no inventamos, leemos.
+const DAYS_NUMBER_RE = /\b(\d{1,3})\s*(?:calendar\s+|business\s+|working\s+)?days?\b/gi;
+
+export function reconcileDays(clause, policyText, modelDays) {
+  if (!clause) return modelDays;
+  const ctx = evidenceContext(clause, policyText);
+  const window = ctx ? ctx.window : normText(clause);
+  DAYS_NUMBER_RE.lastIndex = 0;
+  const matches = [...window.matchAll(DAYS_NUMBER_RE)];
+  if (matches.length !== 1) return modelDays;   // ambiguo o sin cifra: no se toca
+  return parseInt(matches[0][1], 10);
+}
+
 
 // SEGURIDAD C09 (determinista): la cita condiciona el resultado a la ley del
 // estado/jurisdiccion del comprador. Si la request no trae ese dato, no podemos
@@ -467,6 +493,22 @@ export function candidateClauses(policyText, { max = 12, minLen = 30, maxLen = 4
 export function candidateBlock(candidates) {
   if (!candidates || !candidates.length) return "";
   return candidates.map((c, n) => `[${n + 1}] ${c}`).join("\n");
+}
+
+// Hallazgo B (doc 65) — a veces el modelo copia la línea ENTERA de la lista de
+// candidatas, número incluido: "[2] They must be returned in person...". Ese
+// "[2] " es nuestro, no del comercio. Dos daños si se cuela: (1) `clauseInText`
+// falla porque ese texto no está en la página, así que se pierde el caso; (2) si
+// alguna vez pasara el filtro, entregaríamos como cita literal del comercio un
+// texto que el comercio no escribió — para un producto que vende "la cláusula,
+// palabra por palabra", eso rompe la promesa, no solo la cobertura.
+// Solo quita el prefijo si es EXACTAMENTE el patrón `[n] ` al principio: no toca
+// citas que legítimamente empiecen por un corchete de otro tipo.
+const CANDIDATE_INDEX_PREFIX_RE = /^\[\d{1,2}\]\s+/;
+
+export function stripCandidateIndexPrefix(clause) {
+  if (!clause) return clause;
+  return clause.replace(CANDIDATE_INDEX_PREFIX_RE, "");
 }
 
 // Resuelve qué cita usar. El orden importa y es deliberado:

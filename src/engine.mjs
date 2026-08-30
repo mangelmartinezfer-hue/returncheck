@@ -12,7 +12,8 @@ import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerd
           clauseIsJurisdictionConditional, policyDefersToSeller,
           clausePositiveButUnverifiedForOpenedItem, conditionExclusionClause,
           negativeClauseWrongCondition, guessedPolicyUrls,
-          policyScopedToOtherCountry } from "./text.mjs";
+          policyScopedToOtherCountry, stripCandidateIndexPrefix,
+          reconcileDays } from "./text.mjs";
 import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld.mjs";
 import { recordCheck } from "./metrics.mjs";
 import { capturePolicy, recordCorpusUse } from "./corpus.mjs";
@@ -265,6 +266,19 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
   if (!("country" in merchant)) merchant.country = req.buyer_country || null;
 
   const determinate = ["YES", "YES_WITH_CONDITIONS", "NO"].includes(ai.verdict);
+
+  // Hallazgo A (doc 65) — la cita manda sobre el número que dio el modelo. Si la
+  // ventana de la cita contiene EXACTAMENTE una cifra de días, esa cifra
+  // reemplaza a `merchant_return_days` antes de verificar y antes de servirla:
+  // es la evidencia que vendemos, no lo que tecleó el modelo. Con dos cifras en
+  // la ventana no se decide por el modelo y se conserva su número (podrá seguir
+  // abstiene si no encaja).
+  if (determinate && ai.policy && ai.evidence && ai.evidence.exact_clause) {
+    ai.policy.merchant_return_days = reconcileDays(
+      ai.evidence.exact_clause, policyText, ai.policy.merchant_return_days
+    );
+  }
+
   const resp = {
     schema_version: "1.0",
     verdict: ai.verdict,
@@ -670,6 +684,16 @@ export async function runCheck(env, req) {
     reason: "The engine could not extract a structured answer from this page.",
   };
   const ai_ms = Date.now() - tAi;
+
+  // Hallazgo B (doc 65) — el modelo a veces copia la línea entera de la lista de
+  // candidatas, número incluido ("[2] ..."). Ese número es nuestro, no del
+  // comercio: si se cuela, o se pierde el caso (la página no contiene "[2] ") o,
+  // peor, entregamos como cita literal un texto que el comercio no escribió. Se
+  // limpia aquí, antes de cualquier verificación, para que ni pickClause ni
+  // clauseInText lo vean.
+  if (ai.evidence && ai.evidence.exact_clause) {
+    ai.evidence.exact_clause = stripCandidateIndexPrefix(ai.evidence.exact_clause);
+  }
 
   // W05 — si el modelo eligio una frase candidata valida, la cita pasa a ser la
   // frase LITERAL de la pagina, no lo que el modelo tecleo. Si no eligio, o el
