@@ -25,6 +25,7 @@ import { x402Activo, requisitosDePago, leerFirmaDePago, meterEnSobre, cabeceraLi
 import { puertaHumana, retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.mjs";
 import { inferenceParams } from "./prompt.mjs";
 import { sondearTanda, resumir } from "./adquisicion.mjs";
+import { fichaPublicada, paginaFicha, gemeloJson, paginaIndice, indiceJson, sitemap, pagina404 } from "./cards.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
 
@@ -409,6 +410,75 @@ function dataPolicy(env) {
 }
 
 // Manifiesto en texto para agentes/LLMs que rastrean el dominio.
+// ---- W52: FICHAS DE EVIDENCIA ----
+//
+// Las cuatro rutas publicas de lectura. No hay estado, no hay clave, no hay coste:
+// todo sale del registro de fichas y del objeto que las dos caras comparten.
+//
+// La URL base sale de PUBLIC_BASE_URL, y si falta, del origen de la peticion: un
+// sitemap con URLs relativas no sirve para nada, y prefiero que funcione en `wrangler
+// dev` sin configurar nada a que salga medio roto.
+function baseDe(env, url) {
+  return env.PUBLIC_BASE_URL || url.origin;
+}
+
+// Cabeceras comunes: publicas, cacheables y abiertas a peticiones de agentes desde
+// cualquier origen. Es contenido para ser leido y citado; cerrarlo seria absurdo.
+const CARD_HEADERS = {
+  "cache-control": "public, max-age=3600",
+  "access-control-allow-origin": "*",
+};
+
+function htmlResponse(body, status = 200) {
+  return new Response(body, {
+    status,
+    headers: { "content-type": "text/html; charset=utf-8", ...CARD_HEADERS },
+  });
+}
+
+function cardsIndex(env, url) {
+  return htmlResponse(paginaIndice(baseDe(env, url)));
+}
+
+function cardsIndexJson(env, url) {
+  return json(indiceJson(baseDe(env, url)), { headers: CARD_HEADERS });
+}
+
+// GET /cards/{id} y GET /cards/{id}.json — la misma ficha, dos formas de leerla.
+//
+// UNA FICHA NO PUBLICADA DA 404, NO UN BORRADOR. Ni la pagina ni el JSON dejan
+// entrever que existe: para el mundo, una ficha sin revisar no existe. Y da igual
+// si esta sin marcar o si le falta una clausula — las dos cosas son "no publicable"
+// y las dos salen por la misma puerta.
+function cardRoute(env, url, p) {
+  const base = baseDe(env, url);
+  const resto = p.slice("/cards/".length);
+  const quiereJson = resto.endsWith(".json");
+  const id = quiereJson ? resto.slice(0, -".json".length) : resto;
+
+  const card = fichaPublicada(id);
+  if (!card) {
+    return quiereJson
+      ? errorResponse("INVALID_INPUT", "Not found.", 404)
+      : htmlResponse(pagina404(base), 404);
+  }
+  if (quiereJson) {
+    // MISMA sangria que el bloque impreso en la pagina, a proposito: los dos textos
+    // salen de gemeloJson() y son identicos caracter a caracter. Hay una prueba que
+    // lo comprueba, porque el dia que dejen de serlo la ficha deja de valer.
+    return new Response(JSON.stringify(gemeloJson(card, base), null, 2), {
+      headers: { "content-type": "application/json; charset=utf-8", ...CARD_HEADERS },
+    });
+  }
+  return htmlResponse(paginaFicha(card, base));
+}
+
+function sitemapXml(env, url) {
+  return new Response(sitemap(baseDe(env, url)), {
+    headers: { "content-type": "application/xml; charset=utf-8", ...CARD_HEADERS },
+  });
+}
+
 export function llmsTxt(env) {
   const base = env.PUBLIC_BASE_URL || "";
   const price = Number(env.PRICE_USD || "0.02");
@@ -457,6 +527,16 @@ Response: {"verdict":"YES_WITH_CONDITIONS","returnable":true,"confidence":0.9,
 - You can read the page; you cannot prove later what it said. We quote it verbatim and date it.
 - Built for agent-to-agent commerce: MCP tool + x402-friendly micro-pricing ($${price}/verified answer).
 - Neutral: works across merchants; we sell to every shopping agent, we don't compete with them.
+
+## Evidence Cards — free, no key, no charge
+Published answers to specific return-policy questions, each quoting the merchant's own
+clause with its source URL and the date we read it. Every card exists twice under one
+stable card_id: an HTML page for people and the identical data as JSON for you.
+- Index: ${base}/cards  ·  as JSON: ${base}/cards.json
+- One card: ${base}/cards/{card_id}  ·  as JSON: ${base}/cards/{card_id}.json
+- Sitemap: ${base}/sitemap.xml
+These are hand-reviewed and dated, not generated on demand. For a specific purchase,
+call check_return — the cards cannot know your item, seller or dates.
 
 ## Discovery
 - MCP manifest (tool list): ${base}/mcp
@@ -980,6 +1060,15 @@ export default {
       if (request.method === "GET" && (p === "/agents.json" || p === "/.well-known/agents.json")) return agentsJson(env);
       // W48 — terminos de pago x402, publicos y sin autenticacion.
       if (request.method === "GET" && p === "/.well-known/x402") return wellKnownX402(env);
+      // W52 — FICHAS DE EVIDENCIA. Lectura publica: sin clave, sin cobro, sin
+      // escribir en ninguna tabla. Una pagina para una persona y su gemelo JSON
+      // para un agente, bajo el mismo card_id y derivados del mismo objeto.
+      // Van ANTES de las rutas con clave porque no comparten nada con ellas.
+      if (request.method === "GET" && (p === "/cards" || p === "/cards/"))
+        return cardsIndex(env, url);
+      if (request.method === "GET" && p === "/cards.json") return cardsIndexJson(env, url);
+      if (request.method === "GET" && p.startsWith("/cards/")) return cardRoute(env, url, p);
+      if (request.method === "GET" && p === "/sitemap.xml") return sitemapXml(env, url);
       // Panel de control (protegido con clave de administrador).
       if (request.method === "GET" && p === "/stats") return await handleStats(request, env, url);
       // W16 — AVISOS DE CAMBIO DE POLITICA. Se PIDEN, no se empujan: un agente es
