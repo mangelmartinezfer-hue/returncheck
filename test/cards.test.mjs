@@ -18,11 +18,43 @@ const BASE = "https://rc.example";
 const ENV = { PUBLIC_BASE_URL: BASE, PRICE_USD: "0.02" };
 const get = (path, env = ENV) => worker.fetch(new Request(BASE + path), env);
 
-// La ficha publicada y una sin publicar, sacadas del registro real: si manana se
-// publica la de eBay, estas pruebas fallan y hay que elegir otra. Es lo correcto —
-// obliga a mirar.
 const PUBLICADA = "rc-card-target-who-sold-it";
-const SIN_PUBLICAR = "rc-card-ebay-seller-decides";
+
+// EL CANARIO. Una ficha sin publicar, metida en el registro SOLO durante la prueba.
+//
+// Antes esta prueba usaba la ficha de eBay, que estaba en borrador. Al publicarla
+// fallo — que era justo lo que se buscaba, obligar a mirar — pero enseño que atar
+// la prueba de la puerta a que exista un borrador de verdad es fragil: el dia que
+// todas las fichas esten publicadas, la prueba se queda sin sujeto y el 404 deja de
+// comprobarse justo cuando ya nadie se acuerda de el.
+//
+// Asi se ejercita el enrutador REAL contra una ficha sin publicar, siempre, sin
+// depender de que haya trabajo a medias y sin meter datos de mentira en produccion.
+const SIN_PUBLICAR = "rc-card-canario-sin-publicar";
+CARDS.set(SIN_PUBLICAR, {
+  card_id: SIN_PUBLICAR,
+  merchant: "canario",
+  merchant_name: "Canario",
+  country: "US",
+  published: false,
+  verified_on: "2026-08-20",
+  source_url: "https://example.invalid/policy",
+  question: "Does an unpublished card leak?",
+  answer: "conditional",
+  page: { title: "Palabra que no debe salir jamas: cuervopalido", meta_description: "" },
+  outcomes: [
+    {
+      days: 1,
+      basis: "delivery",
+      when: "never served",
+      conditions: [],
+      clause: "cuervopalido",
+      source_url: "https://example.invalid/policy",
+      verified_on: "2026-08-20",
+    },
+  ],
+  denials: [],
+});
 
 // ---------------------------------------------------------------------------
 // La puerta
@@ -32,24 +64,22 @@ test("puerta: published es false por defecto — una ficha sin el campo no se si
   assert.equal(esPublicable({ card_id: "rc-card-x", question: "q" }), false);
 });
 
-test("puerta: la ficha de eBay esta en el registro pero NO publicada", () => {
-  assert.ok(CARDS.has(SIN_PUBLICAR), "el borrador debe existir como fichero");
+test("puerta: el canario esta en el registro pero NO es publicable", () => {
+  assert.ok(CARDS.has(SIN_PUBLICAR));
   assert.equal(esPublicable(CARDS.get(SIN_PUBLICAR)), false);
 });
 
 test("puerta: una ficha sin publicar da 404 en HTML, y no un borrador", async () => {
   const r = await get("/cards/" + SIN_PUBLICAR);
   assert.equal(r.status, 404);
-  const t = await r.text();
-  // Nada del borrador puede asomar: ni el titulo, ni la pregunta, ni el comercio.
-  assert.doesNotMatch(t, /seller decides/i);
-  assert.doesNotMatch(t, /Money Back Guarantee/i);
+  // Nada suyo puede asomar: ni el titulo, ni la clausula, ni la pregunta.
+  assert.doesNotMatch(await r.text(), /cuervopalido/i);
 });
 
 test("puerta: una ficha sin publicar da 404 tambien en JSON", async () => {
   const r = await get("/cards/" + SIN_PUBLICAR + ".json");
   assert.equal(r.status, 404);
-  assert.doesNotMatch(await r.text(), /ebay/i);
+  assert.doesNotMatch(await r.text(), /cuervopalido/i);
 });
 
 test("puerta: un card_id inexistente da 404, igual que uno sin publicar", async () => {
@@ -58,7 +88,12 @@ test("puerta: un card_id inexistente da 404, igual que uno sin publicar", async 
 });
 
 test("puerta: published:true NO basta si falta una clausula literal", () => {
-  const aMedias = { ...CARDS.get(SIN_PUBLICAR), published: true };
+  const base = CARDS.get(SIN_PUBLICAR);
+  const aMedias = {
+    ...base,
+    published: true,
+    outcomes: [{ ...base.outcomes[0], clause: "" }],
+  };
   assert.equal(esPublicable(aMedias), false);
   assert.match(motivosNoPublicable(aMedias).join(" "), /outcomes\[0\]\.clause/);
 });
@@ -124,6 +159,83 @@ test("una nota NUNCA se sirve como cita: va en `note`, no en `clause`", async ()
   assert.ok(abiertos, "debe estar el bloque de articulos abiertos");
   assert.equal(abiertos.clause, undefined);
   assert.match(abiertos.note, /may be denied/i);
+});
+
+// ---------------------------------------------------------------------------
+// Las otras dos fichas — y lo que tienen de raro
+// ---------------------------------------------------------------------------
+
+const EBAY = "rc-card-ebay-seller-decides";
+const COSTCO = "rc-card-costco-satisfaction-guaranteed";
+
+test("las tres fichas del orden acordado estan publicadas y responden 200", async () => {
+  for (const id of [PUBLICADA, EBAY, COSTCO]) {
+    assert.equal((await get("/cards/" + id)).status, 200, id);
+    assert.equal((await get("/cards/" + id + ".json")).status, 200, id + ".json");
+  }
+});
+
+test("SIN NUMERO INVENTADO: si la clausula no da plazo, no hay `days` ni `basis`", async () => {
+  const j = JSON.parse(await (await get("/cards/" + EBAY + ".json")).text());
+  // «lo decide el vendedor» y «even if the seller doesn't offer returns» no dicen
+  // ningun plazo. Ausente significa "la politica no lo dice" — un 0 o un null se
+  // leerian como cero dias o como un fallo.
+  assert.equal("days" in j.outcomes[0], false);
+  assert.equal("basis" in j.outcomes[0], false);
+  assert.equal(j.outcomes[1].days, 30);
+  assert.equal(j.outcomes[1].basis, "delivery");
+  assert.equal("days" in j.outcomes[2], false);
+});
+
+test("eBay: la clausula que lo hace unico va literal en las dos caras", async () => {
+  const literal = "even if the seller doesn't offer returns";
+  const j = JSON.parse(await (await get("/cards/" + EBAY + ".json")).text());
+  assert.ok(j.outcomes.some((o) => o.clause.includes(literal)));
+  // En HTML la comilla simple de "doesn't" no se escapa, pero las comillas dobles
+  // del entrecomillado si: comprobamos el texto tal y como se ve.
+  const html = await (await get("/cards/" + EBAY)).text();
+  assert.match(html, /even if the seller doesn&#39;t offer returns|even if the seller doesn't offer returns/);
+  assert.match(html, /30 calendar days after the estimated or actual delivery date/);
+});
+
+test("Costco: la regla general no lleva cifra y la pagina pinta una raya", async () => {
+  const j = JSON.parse(await (await get("/cards/" + COSTCO + ".json")).text());
+  assert.equal("days" in j.outcomes[0], false);
+  assert.match(j.outcomes[0].clause, /We guarantee your satisfaction on every product we sell/);
+  assert.equal(j.outcomes[1].days, 90);
+
+  const html = await (await get("/cards/" + COSTCO)).text();
+  assert.match(html, /<span class="days">—<\/span>/);
+  assert.match(html, /<span class="days">90<\/span>/);
+});
+
+test("Costco: los metales preciosos son un denial con su cita literal", async () => {
+  const j = JSON.parse(await (await get("/cards/" + COSTCO + ".json")).text());
+  assert.equal(j.denials.length, 1);
+  assert.equal(j.denials[0].scope, "precious metals");
+  assert.equal(j.denials[0].clause, "Precious metals are non-refundable.");
+});
+
+test("los gemelos no discrepan TAMPOCO en las fichas nuevas", async () => {
+  for (const id of [EBAY, COSTCO]) {
+    const html = await (await get("/cards/" + id)).text();
+    const crudo = await (await get("/cards/" + id + ".json")).text();
+    const enLaPagina = html
+      .match(/<pre>([\s\S]*?)<\/pre>/)[1]
+      .replace(/&quot;/g, '"')
+      .replace(/&gt;/g, ">")
+      .replace(/&lt;/g, "<")
+      .replace(/&amp;/g, "&");
+    assert.equal(enLaPagina, crudo, id);
+  }
+});
+
+test("cada ficha nombra al comercio del que NO somos", async () => {
+  for (const [id, nombre] of [[EBAY, "eBay"], [COSTCO, "Costco"]]) {
+    const html = await (await get("/cards/" + id)).text();
+    assert.match(html, new RegExp("independent and not affiliated with " + nombre, "i"));
+    assert.doesNotMatch(html, /MerchantReturnPolicy/);
+  }
 });
 
 // ---------------------------------------------------------------------------

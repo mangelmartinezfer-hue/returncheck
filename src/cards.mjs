@@ -21,9 +21,10 @@
 
 import cardTarget from "../cards/rc-card-target-who-sold-it.mjs";
 import cardEbay from "../cards/rc-card-ebay-seller-decides.mjs";
+import cardCostco from "../cards/rc-card-costco-satisfaction-guaranteed.mjs";
 
 // El registro. Anadir una ficha = anadir su fichero y una linea aqui.
-const FICHAS = [cardTarget, cardEbay];
+const FICHAS = [cardTarget, cardEbay, cardCostco];
 
 export const CARDS = new Map(FICHAS.map((c) => [c.card_id, c]));
 
@@ -76,8 +77,11 @@ export function fichaPublicada(cardId) {
   return c && esPublicable(c) ? c : undefined;
 }
 
+// Se recorre CARDS y no FICHAS a proposito: el registro es UNO. Si el indice
+// mirase una lista y la ruta otra, podrian dejar de coincidir — que es la misma
+// clase de error que evita gemeloJson() entre las dos caras de una ficha.
 export function fichasPublicadas() {
-  return FICHAS.filter(esPublicable);
+  return [...CARDS.values()].filter(esPublicable);
 }
 
 // ---------------------------------------------------------------------------
@@ -96,8 +100,14 @@ export function gemeloJson(card, base) {
     depends_on: card.depends_on || [],
     outcomes: card.outcomes.map((o) => {
       const fila = {};
-      if (o.days !== null && o.days !== undefined) fila.days = o.days;
-      fila.basis = o.basis;
+      // SIN `days` CUANDO LA CLAUSULA NO DA UN NUMERO. En eBay («lo decide el
+      // vendedor») y en Costco («sin plazo») no hay cifra que dar, y un 0 o un null
+      // se leerian como "cero dias" o como un fallo. Ausente significa: la politica
+      // no lo dice. Y `basis` se cae con el, porque contar desde algo exige contar.
+      if (o.days !== null && o.days !== undefined) {
+        fila.days = o.days;
+        fila.basis = o.basis;
+      }
       fila.when = o.when;
       fila.conditions = o.conditions || [];
       fila.clause = o.clause;
