@@ -186,6 +186,25 @@ export function validarSobreDePago(cabecera, env, { precio = null } = {}) {
 
   const pago = sacarDelSobre(cabecera);
   if (!pago) return { ok: false, error: "PAYMENT-SIGNATURE is not valid base64 JSON." };
+  return validarPagoDecodificado(pago, env, { precio });
+}
+
+/**
+ * W51 — EL MISMO PARSER, PARA UN PaymentPayload YA DECODIFICADO.
+ *
+ * Sobre HTTP el pago llega en base64 dentro de una cabecera. Sobre MCP, el
+ * estandar del x402 Foundation lo manda como OBJETO en _meta["x402/payment"].
+ * Es el mismo contenido por dos vehiculos, asi que tiene que pasar por las
+ * mismas comprobaciones — sobre todo por `aceptadoCoincide`, que es la que
+ * impide que nos desvien el dinero. Si aqui hubiera dos validadores, esa
+ * comprobacion acabaria existiendo en uno y faltando en el otro.
+ *
+ * `validarSobreDePago` decodifica y llama a esta; quien ya tiene el objeto la
+ * llama directamente. Un solo camino de validacion, dos puertas de entrada.
+ */
+export function validarPagoDecodificado(pago, env, { precio = null } = {}) {
+  if (!pago || typeof pago !== "object" || Array.isArray(pago))
+    return { ok: false, error: "Payment payload must be an object." };
   if (Number(pago.x402Version) !== X402_VERSION)
     return { ok: false, error: `Unsupported x402Version: expected ${X402_VERSION}.` };
   if (!pago.accepted || !pago.payload)
@@ -212,10 +231,21 @@ export function leerFirmaDePago(request, env, { precio = null } = {}) {
 // La respuesta de liquidación
 // ---------------------------------------------------------------------------
 
-export function cabeceraLiquidacion({ success, transaction = "", network = "", payer = "", errorReason = null }) {
+/**
+ * El cuerpo de la liquidacion: el `SettlementResponse` de la especificacion,
+ * como OBJETO. W51 lo separa del sobre porque ahora hacen falta las dos formas
+ * —el objeto para _meta["x402/payment-response"] en MCP, el base64 para la
+ * cabecera PAYMENT-RESPONSE en HTTP— y tienen que salir del MISMO sitio. Si se
+ * construyeran por separado, transaccion, red y pagador podrian discrepar.
+ */
+export function cuerpoLiquidacion({ success, transaction = "", network = "", payer = "", errorReason = null }) {
   const cuerpo = { success: !!success, transaction: transaction || "", network: network || "", payer: payer || "" };
   if (!success && errorReason) cuerpo.errorReason = errorReason;
-  return meterEnSobre(cuerpo);
+  return cuerpo;
+}
+
+export function cabeceraLiquidacion(args) {
+  return meterEnSobre(cuerpoLiquidacion(args));
 }
 
 /** Quién pagó, para poder registrarlo. Nunca lanza. */

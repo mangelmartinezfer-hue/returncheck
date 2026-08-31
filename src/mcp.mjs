@@ -8,8 +8,10 @@ import { validateRequest } from "./contract.mjs";
 import { runCheck, EngineError } from "./engine.mjs";
 import { getClient, chargeAtomic, markFree } from "./billing.mjs";
 import { freeTrial } from "./freetier.mjs";
-import { x402Activo, validarSobreDePago, sacarDelSobre, cabeceraLiquidacion } from "./x402.mjs";
+import { x402Activo, validarSobreDePago, validarPagoDecodificado, sacarDelSobre,
+         cabeceraLiquidacion } from "./x402.mjs";
 import { retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.mjs";
+import { canonico } from "./idempotencia.mjs";
 
 const DEFAULT_PROTOCOL = "2025-06-18";
 
@@ -84,7 +86,7 @@ function rpcResult(id, result) { return { jsonrpc: "2.0", id, result }; }
 function rpcError(id, code, message) { return { jsonrpc: "2.0", id, error: { code, message } }; }
 
 // Ejecuta la herramienta check_return (tramo gratis sin clave, o con auth + cobro).
-async function callCheckReturn(args, env, apiKey, request) {
+async function callCheckReturn(args, env, apiKey, request, meta) {
   const price = Number(env.PRICE_USD || "0.02");
   const chargeOnUnknown = String(env.CHARGE_ON_UNKNOWN || "false") === "true";
   const signup = `${env.PUBLIC_BASE_URL || ""}/v1/signup`;
@@ -92,8 +94,17 @@ async function callCheckReturn(args, env, apiKey, request) {
   // W48 — CAMINO DE PAGO. Se mira ANTES del tramo gratis, exactamente por la misma
   // razon que en /v1/check: quien ofrece pagar no debe gastar su cuota gratuita
   // sin querer.
-  if (x402Activo(env) && typeof args.payment_signature === "string" && args.payment_signature.trim())
-    return await pagarConX402(args, env, request);
+  //
+  // W51 — DOS VEHICULOS PARA EL MISMO PAGO. El estandar del x402 Foundation manda
+  // el PaymentPayload como OBJETO en _meta["x402/payment"]; nuestro argumento
+  // `payment_signature` (base64) es una invencion nuestra de W48. Se admiten los
+  // dos: el estandar porque es el que usara cualquier cliente x402 de MCP, y el
+  // argumento porque ya lo publicamos y hay gente a la que se lo dijimos.
+  const pagoMeta = meta ? meta["x402/payment"] : undefined;
+  const pagoArg = typeof args.payment_signature === "string" && args.payment_signature.trim()
+    ? args.payment_signature : null;
+  if (x402Activo(env) && (pagoMeta !== undefined || pagoArg))
+    return await pagarConX402(args, env, request, { pagoMeta, pagoArg });
 
   // Sin clave: probamos el tramo GRATIS (topes por IP/día y global). Si no queda,
   // pedimos alta. Esto permite que un agente autónomo pruebe sin registrarse.
@@ -248,44 +259,164 @@ function retoMcp(env, request, motivo) {
 const LIQUIDACION_REAL = new Set(["confirmed", "pending", "unconfirmed", "replay"]);
 
 /**
- * El bloque de evidencia de pago. Se construye A PARTIR DEL SOBRE, no en
- * paralelo: asi `transaction`, `network` y `payer` no pueden discrepar de lo que
- * dice `payment_response`, que es el mismo base64 que viaja por la cabecera
- * PAYMENT-RESPONSE en HTTP. Devuelve null cuando no hay liquidacion real.
+ * La evidencia de pago, en SUS DOS FORMAS, sacadas del MISMO sobre.
+ *
+ * W51 — hacen falta dos representaciones y no pueden discrepar:
+ *   · `settlement`: el SettlementResponse estandar, como OBJETO, que es lo que
+ *     el x402 Foundation pide en _meta["x402/payment-response"].
+ *   · `bloque`: nuestro structuredContent.x402, que se mantiene porque un cliente
+ *     con tipos estrictos puede descartar `_meta` igual que descartaria un campo
+ *     hermano, y entonces se quedaria sin la unica evidencia accesible.
+ * Las dos se derivan de `cabecera` —el sobre base64 de la liquidacion— asi que
+ * transaccion, red y pagador salen de la misma fuente por construccion. Si se
+ * construyeran por separado podrian decir cosas distintas, que es exactamente el
+ * fallo que este modulo existe para no tener.
+ *
+ * Devuelve null cuando no hay liquidacion real: gratis, reto y UNKNOWN no pasan
+ * por aqui, y esa ausencia es la regla de arriba hecha codigo.
  */
-function bloqueX402({ estado, cabecera, coste, redPorDefecto }) {
+export function evidenciaDePago({ estado, cabecera, coste }) {
   if (!LIQUIDACION_REAL.has(estado) || !cabecera) return null;
   const sobre = sacarDelSobre(cabecera) || {};
-  return {
-    settlement: estado,
+
+  // W51 — LA INVARIANTE, COMPROBADA AQUI Y NO SUPUESTA.
+  //
+  // `estado === "confirmed"` NO basta. Si el estado dijera "confirmed" y el sobre
+  // trajera success:false, el objeto estandar saldria con {"success":false} —
+  // justo el valor que hemos decidido no emitir nunca. Hoy esa combinacion no la
+  // produce cobro-x402.mjs, pero "hoy no puede pasar" no es una invariante: es
+  // una coincidencia entre dos ficheros que alguien puede romper sin darse
+  // cuenta. Se comprueba en el ensamblador, que es donde se emite la evidencia.
+  //
+  // Las cinco condiciones tienen que darse A LA VEZ, y las cuatro ultimas salen
+  // del SOBRE, nunca de fuera: la red anunciada NO puede rellenar una red que la
+  // liquidacion no devolvio, ni se fabrican cadenas vacias para que el objeto
+  // parezca completo. `payer` entra en la lista porque sin el no se puede
+  // correlacionar el pago, que es para lo que existe esta evidencia.
+  const lleno = (v) => typeof v === "string" && v.trim() !== "";
+  const sostenible = estado === "confirmed"
+    && sobre.success === true
+    && lleno(sobre.transaction)
+    && lleno(sobre.network)
+    && lleno(sobre.payer);
+
+  // ESTADO CONSERVADOR. Un "confirmed" que el sobre no sostiene no se sirve como
+  // confirmado: baja a "unconfirmed", que es justo lo que significa —ni el
+  // comprador ni nosotros sabemos en que quedo—. Dejarlo como "confirmed" seria
+  // quitar el objeto estandar por la puerta y afirmar lo mismo por la ventana.
+  const estadoServido = (estado === "confirmed" && !sostenible) ? "unconfirmed" : estado;
+
+  // W51 — TODO SALE DEL SOBRE, tambien aqui. El bloque afirma ser evidencia
+  // construida desde `payment_response`, asi que no puede completar despues una
+  // red que el sobre no trae: seria la misma clase de relleno con un valor
+  // exterior que se quito del objeto estandar, solo que mas dificil de ver
+  // porque va al lado del sobre crudo que la desmiente.
+  const bloque = {
+    settlement: estadoServido,
     transaction: sobre.transaction || null,
-    network: sobre.network || redPorDefecto || null,
+    network: sobre.network || null,
     payer: sobre.payer || null,
     cost_usd: Number(coste || 0).toFixed(4),
     // El sobre crudo, para que la evidencia por MCP sea identica a la de HTTP.
     payment_response: cabecera,
   };
+
+  // W51 — LA FORMA ESTANDAR SOLO SE USA CUANDO PODEMOS SOSTENER SU SEMANTICA.
+  //
+  // El SettlementResponse de la especificacion tiene DOS desenlaces: exito o
+  // fallo. Nosotros tenemos TRES estados, porque desde W41 una liquidacion
+  // INCIERTA se sirve igual y se declara. Meter "no lo se" en un campo que solo
+  // sabe decir si/no obliga a mentir en una de las dos direcciones:
+  //   · success:true seria afirmar un cobro que no consta;
+  //   · success:false lo leeria un cliente automatico como "fallo", y podria
+  //     firmar una autorizacion NUEVA — con otra huella, que la idempotencia ya
+  //     no atrapa — y pagar dos veces.
+  // Asi que en `pending` y `unconfirmed` NO se emite el objeto estandar. El
+  // estado sigue siendo visible en nuestro bloque, que si sabe decir tres cosas.
+  // Compatibilidad parcial y honesta, en vez de completa y falsa.
+  //
+  // `replay` TAMPOCO lo emite, y por un motivo distinto: no se puede reconstruir
+  // el pagador de forma fiable. El registro de idempotencia no guarda columna de
+  // pagador, y el sobre que presenta el cliente en el reintento no sirve para
+  // afirmarlo — la huella NO cubre payload.authorization.from (solo los cinco
+  // campos de dinero, metodo, ruta y cuerpo), y un reintento no vuelve a llamar
+  // al facilitador. O sea que un `from` distinto pasaria sin que nada lo
+  // verifique, y lo estariamos publicando como el pagador de la liquidacion
+  // original. Antes se omite que se inventa.
+  // DEUDA ANOTADA: para emitirlo en replay haria falta guardar el pagador en
+  // payment_idempotency. No se amplia el esquema sin autorizacion.
+  // Todo lo que va aqui sale del sobre y ya se ha comprobado que esta lleno. Sin
+  // `||` de respaldo: si hiciera falta uno, es que no habia evidencia que emitir.
+  const settlement = sostenible
+    ? {
+        success: true,
+        transaction: sobre.transaction,
+        network: sobre.network,
+        payer: sobre.payer,
+      }
+    : null;
+
+  return { bloque, settlement };
 }
 
 /** Resultado de herramienta con el veredicto y, si la hubo, la prueba del pago. */
-function resultadoConPago(resp, x402) {
-  const cuerpo = x402 ? { ...resp, x402 } : resp;
+function resultadoConPago(resp, ev) {
+  const cuerpo = ev ? { ...resp, x402: ev.bloque } : resp;
   const texto = JSON.stringify(cuerpo);
-  return { content: [{ type: "text", text: texto }], structuredContent: cuerpo, isError: false };
+  const r = { content: [{ type: "text", text: texto }], structuredContent: cuerpo, isError: false };
+  // W51 — el estandar, ademas de lo nuestro. Objeto, no base64. Solo lo lleva
+  // `confirmed`: ver evidenciaDePago para por que los otros tres no.
+  if (ev && ev.settlement) r._meta = { "x402/payment-response": ev.settlement };
+  return r;
+}
+
+/**
+ * W51 — DE DONDE SALE EL PAGO, CUANDO PUEDE VENIR DE DOS SITIOS.
+ *
+ * Si llegan los dos vehiculos NO se elige uno en silencio y NO se compara el
+ * objeto contra la cadena base64: se DECODIFICA el argumento, se validan los dos
+ * con el MISMO parser, y se comparan los PaymentPayload completos de forma
+ * canonica —claves ordenadas— para que un orden de campos distinto o un
+ * espaciado distinto no cuenten como discrepancia.
+ *
+ * Si son semanticamente iguales se sigue. Si difieren se RECHAZA por ambiguedad,
+ * y no se devuelve un reto: un reto invita a reintentar, y aqui el problema no es
+ * que falte el pago sino que el cliente ha mandado dos pagos distintos. Servir
+ * uno de los dos seria decidir por el cliente a que esta autorizando.
+ */
+function resolverPago(env, { pagoMeta, pagoArg }, precio) {
+  const deMeta = pagoMeta !== undefined && pagoMeta !== null
+    ? validarPagoDecodificado(pagoMeta, env, { precio }) : null;
+  const deArg = pagoArg ? validarSobreDePago(pagoArg, env, { precio }) : null;
+
+  if (deMeta && !deMeta.ok) return deMeta;
+  if (deArg && !deArg.ok) return deArg;
+  if (!deMeta && !deArg) return { ok: false, error: "No payment payload provided." };
+
+  if (deMeta && deArg && canonico(deMeta.pago) !== canonico(deArg.pago))
+    return { ok: false, ambiguo: true,
+      error: "Two different payment payloads were supplied: _meta['x402/payment'] and " +
+             "arguments.payment_signature do not describe the same payment. Send only one." };
+
+  return { ok: true, pago: (deMeta || deArg).pago, via: deMeta ? "_meta" : "argument" };
 }
 
 // ---------------------------------------------------------------------------
 // W48 — EL COBRO. No hay logica de pago aqui: la que hay esta en cobro-x402.mjs
 // y es LA MISMA que ejecuta /v1/check. Esta funcion solo traduce entrada y salida.
 // ---------------------------------------------------------------------------
-async function pagarConX402(args, env, request) {
+async function pagarConX402(args, env, request, vehiculos) {
   const precio = String(env.PRICE_USD || "0.02");
 
-  // 1) La firma, por el MISMO verificador del HTTP — incluida la comprobacion de
-  //    que lo aceptado coincide con lo que pedimos, que no se delega en el
-  //    facilitador. Si no cuadra, se devuelve el reto otra vez con el motivo.
-  const firma = validarSobreDePago(args.payment_signature, env, { precio });
-  if (!firma.ok) return retoMcp(env, request, firma.error) || toolText("Payment required: " + firma.error, true);
+  // 1) El pago, venga por _meta o por el argumento, por el MISMO verificador del
+  //    HTTP — incluida la comprobacion de que lo aceptado coincide con lo que
+  //    pedimos, que no se delega en el facilitador.
+  const firma = resolverPago(env, vehiculos, precio);
+  if (!firma.ok) {
+    // La ambiguedad NO es un reto: no falta el pago, sobran. Se dice y se para.
+    if (firma.ambiguo) return toolText(firma.error, true);
+    return retoMcp(env, request, firma.error) || toolText("Payment required: " + firma.error, true);
+  }
   const aceptado = firma.pago.accepted;
 
   // 2) La peticion, contra el contrato v1.0 sin tocar. `payment_signature` no
@@ -310,16 +441,15 @@ async function pagarConX402(args, env, request) {
     let resp = null;
     try { resp = JSON.parse(r.cuerpo); } catch (_) { resp = null; }
     if (!resp) return toolText("Replay of a previous paid call, but the stored answer could not be read.", true);
-    const x402 = r.transaccion
-      ? bloqueX402({
+    const ev = r.transaccion
+      ? evidenciaDePago({
           estado: "replay",
           cabecera: cabeceraLiquidacion({
             success: true, transaction: r.transaccion, network: aceptado.network, payer: null }),
           coste: 0,
-          redPorDefecto: aceptado.network,
         })
       : null;
-    return resultadoConPago(resp, x402);
+    return resultadoConPago(resp, ev);
   }
 
   // Verificacion o liquidacion caida: se vuelve a pedir pago, con el motivo.
@@ -331,11 +461,10 @@ async function pagarConX402(args, env, request) {
   // `estadoLiquidacion` vale "not_charged": se presento una autorizacion de pago,
   // pero NO se produjo liquidacion, asi que aqui no se adjunta nada. Decirlo al
   // reves —"un UNKNOWN pagado"— seria afirmar un pago que no ocurrio.
-  return resultadoConPago(r.resp, bloqueX402({
+  return resultadoConPago(r.resp, evidenciaDePago({
     estado: r.estadoLiquidacion,
     cabecera: r.cabeceraPago,
     coste: r.coste,
-    redPorDefecto: aceptado.network,
   }));
 }
 
@@ -360,7 +489,8 @@ async function handleRpc(msg, env, apiKey, request) {
     case "tools/call": {
       const name = params && params.name;
       if (name !== "check_return") return rpcError(id, -32602, "Unknown tool: " + name);
-      const result = await callCheckReturn((params && params.arguments) || {}, env, apiKey, request);
+      const result = await callCheckReturn((params && params.arguments) || {}, env, apiKey, request,
+                                           (params && params._meta) || null);
       return rpcResult(id, result);
     }
     default:
