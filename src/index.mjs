@@ -21,9 +21,8 @@ import { clauseInText } from "./text.mjs";
 import { corpusStats, deleteMerchantCorpus, sha256full } from "./corpus.mjs";
 import { addWatch, removeWatch, listWatches, changesFor } from "./watch.mjs";
 import { findAnswers, answerStats, markAnswerCharged, purgeExpiredAnswers, deleteClientAnswers, pendingSettlements } from "./answerlog.mjs";
-import { x402Activo, retoDePago, leerFirmaDePago, meterEnSobre, cabeceraLiquidacion } from "./x402.mjs";
-import { verificarPago, liquidarPago, veredictoCobrable } from "./facilitador.mjs";
-import { leerIdentificador, huella, consultar as consultarIdem, guardar as guardarIdem } from "./idempotencia.mjs";
+import { x402Activo, requisitosDePago, leerFirmaDePago, meterEnSobre, cabeceraLiquidacion, X402_VERSION } from "./x402.mjs";
+import { puertaHumana, retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.mjs";
 import { inferenceParams } from "./prompt.mjs";
 import { sondearTanda, resumir } from "./adquisicion.mjs";
 
@@ -519,6 +518,48 @@ export function agentsJson(env) {
   return json(doc, { headers: { "access-control-allow-origin": "*" } });
 }
 
+// ---------------------------------------------------------------------------
+// W48 — /.well-known/x402: los terminos de pago, ANTES de la primera llamada.
+//
+// Hasta hoy la unica forma de enterarse de que esto se puede pagar con x402 era
+// gastar una llamada y chocar contra el 402. Eso funciona, pero obliga a fallar
+// para aprender. Un agente que esta decidiendo a quien llamar quiere saber el
+// precio, la moneda y la red ANTES, y el sitio convenido para publicarlo es una
+// ruta .well-known.
+//
+// PUBLICA, SIN AUTENTICACION Y SIN COBRO: es un anuncio. No toca el motor, no
+// gasta modelo y no mira quien pregunta.
+//
+// SI FALTA CONFIGURACION, 404. Es la misma regla de `requisitosDePago` llevada
+// hasta el final: sin direccion de cobro no se anuncia precio, y un anuncio sin
+// nada que anunciar es mejor que no exista. Antes preferimos no ofrecer el pago
+// que ofrecerlo mal.
+// ---------------------------------------------------------------------------
+function wellKnownX402(env) {
+  const accepts = requisitosDePago(env);
+  if (!accepts)
+    return errorResponse("NOT_FOUND", "x402 payment is not configured on this server.", 404);
+  const base = env.PUBLIC_BASE_URL || "";
+  return json({
+    x402Version: X402_VERSION,
+    resource: {
+      url: base ? base + "/v1/check" : "/v1/check",
+      description: "ReturnCheck — can this specific product actually be returned?",
+      mimeType: "application/json",
+    },
+    accepts,
+    // Los DOS sitios donde se puede gastar esa firma. Se listan porque este lote
+    // es justamente el que hace pagable el MCP: publicar solo el HTTP dejaria la
+    // mitad del trabajo sin anunciar.
+    endpoints: {
+      http: { url: base + "/v1/check", method: "POST", signature_in: "PAYMENT-SIGNATURE header" },
+      mcp: { url: base + "/mcp", tool: "check_return", signature_in: "payment_signature argument" },
+    },
+    unknown_is_free: true,
+    human_next_steps: puertaHumana(env),
+  }, { headers: { "access-control-allow-origin": "*" } });
+}
+
 // OpenAPI mínimo (descubrimiento para agentes/herramientas).
 function openapi(env) {
   const base = env.PUBLIC_BASE_URL || "";
@@ -664,65 +705,23 @@ async function handleSignup(request, env) {
 //   7. Guardar para el reintento
 // ---------------------------------------------------------------------------
 
-/**
- * La puerta humana del 402.
- *
- * EL PROBLEMA QUE ARREGLA. Al encender x402 le abrimos la puerta al agente y, sin
- * darnos cuenta, se la cerramos a la persona. El 402 pasó a decir solo «Free trial
- * exhausted. Payment required.» y un objeto `accepts` que un desarrollador no sabe
- * usar — mientras que el camino que SÍ puede usar (darse de alta y llevarse crédito
- * gratis) dejó de mencionarse. Existía, estaba pagado, y no se veía.
- *
- * Un 402 que no dice cómo seguir es un callejón sin salida con otro número.
- */
-function puertaHumana(env) {
-  const base = env.PUBLIC_BASE_URL || "";
-  const precio = Number(env.PRICE_USD || "0.02");
-  const credito = Number(env.SIGNUP_FREE_CREDIT_USD || "2.00");
-  const porIp = Number(env.FREE_IP_DAILY || "3");
-  const salida = {
-    message:
-      "If you are a human developer: the keyless free trial is " + porIp +
-      " calls per IP per day and it resets daily. For more, sign up — it comes with free credit.",
-    free_trial: { calls_per_ip_per_day: porIp, resets: "daily (UTC)" },
-    signup: {
-      url: base ? base + "/v1/signup" : "/v1/signup",
-      method: "POST",
-      body: { email: "you@example.com" },
-      free_credit_usd: credito,
-      approx_free_calls: precio > 0 ? Math.floor(credito / precio) : null,
-    },
-    price_usd_per_call: precio,
-    unknown_is_free: true,
-  };
-  // HONESTIDAD SOBRE LA RED. Mientras x402 apunte a una red de pruebas, el `accepts`
-  // pide una moneda que no vale dinero. Un agente lo deduce del identificador de
-  // red; una persona, no. Se dice.
-  const red = String(env.X402_NETWORK || "");
-  if (red === "eip155:84532" || /sepolia|testnet/i.test(red)) {
-    salida.x402_note =
-      "x402 payment is currently configured on a TEST network (" + red +
-      "), so it cannot move real money. For real payment use the signup path above.";
-  }
-  return salida;
-}
-
 /** El reto de pago: 402 con el sobre PAYMENT-REQUIRED. */
 function reto402(env, request, motivo) {
-  const reto = retoDePago(env, { url: request.url, error: motivo });
+  // W48 — el reto y su cuerpo se construyen en cobro-x402.mjs, para que el reto
+  // que devuelve el MCP diga EXACTAMENTE lo mismo que este. Si se escribieran dos
+  // veces, se separarian a la primera correccion que solo tocase una.
+  const r = retoConPuertaHumana(env, { url: request.url, motivo });
   // Sin configuracion no se anuncia precio: se cae al 402 educado de siempre.
-  if (!reto) return educated402(env, "Payment is required and x402 is not fully configured on this server.");
+  if (!r) return educated402(env, "Payment is required and x402 is not fully configured on this server.");
   // OJO CON EL ORDEN: el SOBRE lleva el reto TAL CUAL, sin nuestro añadido. Lo que
   // viaja en la cabecera es contrato con el agente y con el facilitador, y ahí no
   // se mete nada que ellos no esperen. La puerta humana va SOLO en el cuerpo, donde
   // un campo de más es inofensivo para quien no lo mira.
-  const sobre = meterEnSobre(reto);
-  const cuerpo = { ...reto, human_next_steps: puertaHumana(env) };
-  return new Response(JSON.stringify(cuerpo), {
+  return new Response(JSON.stringify(r.cuerpo), {
     status: 402,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      "PAYMENT-REQUIRED": sobre,
+      "PAYMENT-REQUIRED": meterEnSobre(r.reto),
       "access-control-allow-origin": "*",
     },
   });
@@ -743,88 +742,44 @@ async function handleCheckX402(request, env) {
   const v = validateRequest(body);
   if (!v.ok) return errorResponse(v.code, v.message, 400);
 
-  // 3) Idempotencia ANTES de verificar y antes de gastar el modelo. Un reintento
-  //    no puede costar dinero ni computo.
-  const idPago = leerIdentificador(firma.pago);
-  let h = null;
-  if (idPago) {
-    h = await huella({ aceptado, metodo: "POST", ruta: new URL(request.url).pathname, cuerpo: v.value });
-    const previo = await consultarIdem(env, idPago, h);
-    if (previo && previo.conflicto)
-      return errorResponse("CONFLICT",
-        "This payment identifier was already used for a different request.", 409);
-    if (previo && previo.repetido) {
-      const cabeceras = {
-        "content-type": "application/json; charset=utf-8",
-        "access-control-allow-origin": "*",
-        "X-ReturnCheck-Replay": "true",     // no se ha vuelto a cobrar
-        "X-ReturnCheck-Cost": "0.0000",
-      };
-      if (previo.transaccion)
-        cabeceras["PAYMENT-RESPONSE"] = cabeceraLiquidacion({
-          success: true, transaction: previo.transaccion, network: aceptado.network, payer: null });
-      return new Response(previo.cuerpo, { status: previo.estado, headers: cabeceras });
-    }
+  // 3-7) El cobro, que a partir de W48 vive en cobro-x402.mjs y lo comparten esta
+  //      ruta y el MCP. Aqui abajo solo queda pintar el resultado en HTTP.
+  const r = await cobrarConX402(env, {
+    pago: firma.pago, aceptado, peticion: v.value,
+    ruta: new URL(request.url).pathname, precio,
+  });
+
+  if (r.tipo === "conflicto")
+    return errorResponse("CONFLICT",
+      "This payment identifier was already used for a different request.", 409);
+
+  if (r.tipo === "repetido") {
+    const cabeceras = {
+      "content-type": "application/json; charset=utf-8",
+      "access-control-allow-origin": "*",
+      "X-ReturnCheck-Replay": "true",     // no se ha vuelto a cobrar
+      "X-ReturnCheck-Cost": "0.0000",
+    };
+    if (r.transaccion)
+      cabeceras["PAYMENT-RESPONSE"] = cabeceraLiquidacion({
+        success: true, transaction: r.transaccion, network: aceptado.network, payer: null });
+    return new Response(r.cuerpo, { status: r.estado, headers: cabeceras });
   }
 
-  // 4) Verificar ANTES de trabajar. Falla cerrado.
-  const ver = await verificarPago(env, { pago: firma.pago, requisitos: aceptado });
-  if (!ver.valido) return reto402(env, request, "Payment verification failed: " + ver.motivo);
+  if (r.tipo === "reto") return reto402(env, request, r.motivo);
+  if (r.tipo === "error") return errorResponse(r.code, r.message, r.http);
 
-  // 5) El motor. Del pagador solo se guarda su huella, igual que de una clave.
-  let resp;
-  try { resp = await runCheck(env, { ...v.value, __api_key: ver.pagador || null }); }
-  catch (e) {
-    if (e instanceof EngineError) return errorResponse(e.code, e.message, e.http);
-    return errorResponse("INTERNAL", "Unexpected error.", 500);
-  }
-  const checkId = resp.meta && resp.meta.check_id;
-
-  // 6) Liquidar. UNKNOWN no se liquida: la autorizacion caduca sin usarse y no se
-  //    mueve un centimo. Decision del 22 de agosto, y aqui sale gratis de aplicar.
-  let cabeceraPago = null, coste = 0, transaccion = null, estadoLiquidacion = "not_charged";
-  if (veredictoCobrable(resp.verdict, env)) {
-    const liq = await liquidarPago(env, { pago: firma.pago, requisitos: aceptado });
-    if (!liq.cobrado && !liq.pendiente) {
-      // El trabajo esta hecho y lo hemos pagado nosotros. Servir igualmente
-      // convertiria "haz que falle la liquidacion" en la forma de tener respuestas
-      // gratis.
-      await markAnswerCharged(env, checkId, 0, false);
-      return reto402(env, request, "Payment settlement failed: " + liq.motivo);
-    }
-    transaccion = liq.transaccion || null;
-    coste = Number(precio);
-    cabeceraPago = cabeceraLiquidacion({
-      success: liq.cobrado, transaction: liq.transaccion, network: liq.red,
-      payer: liq.pagador, errorReason: liq.pendiente ? (liq.incierto ? "settlement_unconfirmed" : "settlement_pending") : null });
-    // W41 — TRES ESTADOS, no dos. Solo se marca cobrado lo CONFIRMADO; lo que
-    // está en vuelo o sin confirmar se deja en `null`, que es la verdad, y
-    // aparece en la lista de conciliación. Marcarlo `0` fue lo que hizo que el
-    // registro mintiera el 27 de agosto.
-    await markAnswerCharged(env, checkId, coste, liq.cobrado ? true : null);
-    estadoLiquidacion = liq.cobrado ? "confirmed" : (liq.incierto ? "unconfirmed" : "pending");
-  } else {
-    await markAnswerCharged(env, checkId, 0, false);
-    cabeceraPago = cabeceraLiquidacion({
-      success: false, errorReason: "not_settled_unknown_verdict",
-      network: aceptado.network, payer: ver.pagador });
-  }
-
-  // 7) Guardar para que el reintento no vuelva a cobrar.
-  const cuerpo = JSON.stringify(resp);
-  if (idPago && h) await guardarIdem(env, { id: idPago, huella: h, cuerpo, estado: 200, transaccion });
-
-  return new Response(cuerpo, {
+  return new Response(r.cuerpo, {
     status: 200,
     headers: {
       "content-type": "application/json; charset=utf-8",
       "access-control-allow-origin": "*",
-      "PAYMENT-RESPONSE": cabeceraPago,
-      "X-ReturnCheck-Cost": coste.toFixed(4),
+      "PAYMENT-RESPONSE": r.cabeceraPago,
+      "X-ReturnCheck-Cost": r.coste.toFixed(4),
       // W41 — que el cliente sepa en qué estado quedó su dinero sin tener que
       // mirar la cadena. "unconfirmed" no significa que no haya pagado:
       // significa que ni él ni nosotros lo sabemos todavía.
-      "X-ReturnCheck-Settlement": estadoLiquidacion,
+      "X-ReturnCheck-Settlement": r.estadoLiquidacion,
     },
   });
 }
@@ -1006,6 +961,8 @@ export default {
       if (request.method === "GET" && (p === "/openapi.json" || p === "/.well-known/openapi.json")) return openapi(env);
       if (request.method === "GET" && (p === "/.well-known/ai-plugin.json" || p === "/ai-plugin.json")) return aiPluginJson(env);
       if (request.method === "GET" && (p === "/agents.json" || p === "/.well-known/agents.json")) return agentsJson(env);
+      // W48 — terminos de pago x402, publicos y sin autenticacion.
+      if (request.method === "GET" && p === "/.well-known/x402") return wellKnownX402(env);
       // Panel de control (protegido con clave de administrador).
       if (request.method === "GET" && p === "/stats") return await handleStats(request, env, url);
       // W16 — AVISOS DE CAMBIO DE POLITICA. Se PIDEN, no se empujan: un agente es

@@ -170,11 +170,18 @@ export function aceptadoCoincide(aceptado, requisitos) {
 }
 
 /**
- * Lee la cabecera PAYMENT-SIGNATURE y valida su forma.
+ * Valida el SOBRE de pago, venga de donde venga.
+ *
+ * W48 — se separa del `Request` a proposito. Sobre HTTP el sobre llega en la
+ * cabecera PAYMENT-SIGNATURE; sobre MCP llega como argumento de la herramienta,
+ * porque JSON-RPC no tiene cabeceras. Es el MISMO sobre y tiene que pasar por el
+ * MISMO verificador: si aqui hubiera dos, la comprobacion de `aceptadoCoincide`
+ * —que es la que impide que nos desvien el dinero— acabaria existiendo en una
+ * version y faltando en la otra.
+ *
  * Devuelve { ok:false, error } o { ok:true, pago }.
  */
-export function leerFirmaDePago(request, env, { precio = null } = {}) {
-  const cabecera = request.headers.get("PAYMENT-SIGNATURE");
+export function validarSobreDePago(cabecera, env, { precio = null } = {}) {
   if (!cabecera) return { ok: false, error: "PAYMENT-SIGNATURE header is required" };
 
   const pago = sacarDelSobre(cabecera);
@@ -190,6 +197,15 @@ export function leerFirmaDePago(request, env, { precio = null } = {}) {
     return { ok: false, error: "The accepted payment terms do not match this server's requirements." };
 
   return { ok: true, pago };
+}
+
+/**
+ * Lee la cabecera PAYMENT-SIGNATURE y valida su forma.
+ * Envoltorio de `validarSobreDePago` para el transporte HTTP: se conserva tal
+ * cual estaba porque es lo que usa /v1/check, que esta en produccion cobrando.
+ */
+export function leerFirmaDePago(request, env, { precio = null } = {}) {
+  return validarSobreDePago(request.headers.get("PAYMENT-SIGNATURE"), env, { precio });
 }
 
 // ---------------------------------------------------------------------------

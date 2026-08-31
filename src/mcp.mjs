@@ -8,6 +8,8 @@ import { validateRequest } from "./contract.mjs";
 import { runCheck, EngineError } from "./engine.mjs";
 import { getClient, chargeAtomic, markFree } from "./billing.mjs";
 import { freeTrial } from "./freetier.mjs";
+import { x402Activo, validarSobreDePago } from "./x402.mjs";
+import { retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.mjs";
 
 const DEFAULT_PROTOCOL = "2025-06-18";
 
@@ -48,6 +50,25 @@ export const TOOL = {
       seller_name: { type: "string" },
       page_text: { type: "string", description: "RECOMMENDED. Plain text of the product or returns page you already have open. We verify against this instead of fetching: works on any store, no blocking, no JavaScript problem, and faster. Still never invents: no verifiable clause -> UNKNOWN (free)." },
       page_html: { type: "string", description: "RECOMMENDED (alternative to page_text). Raw HTML of the same page. Slightly better than page_text: we can also read structured data (JSON-LD) from it." },
+      // W48 — PAGO SIN CUENTA, POR AQUI DENTRO.
+      //
+      // MCP va sobre JSON-RPC y ahi no hay cabeceras: la cabecera
+      // PAYMENT-SIGNATURE que usa /v1/check no tiene donde viajar. El sobre es el
+      // mismo, solo cambia el vehiculo, asi que entra como argumento.
+      //
+      // OPCIONAL A PROPOSITO: es una adicion, no una ruptura. Un agente que ya
+      // nos llamaba sigue llamando igual, el contrato v1.0 no se toca, y este
+      // campo nunca llega al motor (validateRequest solo deja pasar los campos
+      // del contrato).
+      payment_signature: {
+        type: "string",
+        description:
+          "OPTIONAL. x402 payment authorization, base64 — the same envelope the PAYMENT-SIGNATURE header carries over HTTP. " +
+          "Use it to pay per call with no account and no signup. How: call once without it; if the free trial is exhausted " +
+          "you get the payment terms in structuredContent (x402Version, accepts[]); sign that authorization and call again " +
+          "with payment_signature set. Terms are also published at /.well-known/x402. UNKNOWN verdicts are never settled: " +
+          "the authorization simply expires unused.",
+      },
     },
     required: ["product_url", "buyer_country"],
   },
@@ -68,6 +89,12 @@ async function callCheckReturn(args, env, apiKey, request) {
   const chargeOnUnknown = String(env.CHARGE_ON_UNKNOWN || "false") === "true";
   const signup = `${env.PUBLIC_BASE_URL || ""}/v1/signup`;
 
+  // W48 — CAMINO DE PAGO. Se mira ANTES del tramo gratis, exactamente por la misma
+  // razon que en /v1/check: quien ofrece pagar no debe gastar su cuota gratuita
+  // sin querer.
+  if (x402Activo(env) && typeof args.payment_signature === "string" && args.payment_signature.trim())
+    return await pagarConX402(args, env, request);
+
   // Sin clave: probamos el tramo GRATIS (topes por IP/día y global). Si no queda,
   // pedimos alta. Esto permite que un agente autónomo pruebe sin registrarse.
   if (!apiKey) {
@@ -82,6 +109,18 @@ async function callCheckReturn(args, env, apiKey, request) {
         if (e instanceof EngineError) return toolText("Engine error (" + e.code + "): " + e.message, true);
         return toolText("Unexpected engine error.", true);
       }
+    }
+    // W48 — AQUI ESTABA EL CALLEJON SIN SALIDA, todavia. En W32 el 402 de
+    // /v1/check dejo de ser un muro y paso a ser una puerta; este mismo momento,
+    // en MCP, seguia devolviendo un parrafo pidiendo un correo. Un agente
+    // autonomo no tiene correo. Con x402 encendido, aqui va el reto de pago.
+    // El interruptor manda, igual que en /v1/check: con x402 apagado aqui no
+    // cambia absolutamente nada. Y si `retoMcp` no puede construirlo (falta
+    // direccion de cobro), se cae al mensaje de alta de siempre: sin direccion de
+    // cobro no se anuncia precio.
+    if (x402Activo(env)) {
+      const reto = retoMcp(env, request, "Free trial exhausted. Payment required.");
+      if (reto) return reto;
     }
     return toolText(`Free trial limit reached (or disabled). Get a free API key (includes $${Number(env.SIGNUP_FREE_CREDIT_USD || "2").toFixed(2)} of credit) by POSTing your email to ${signup}, then call with 'Authorization: Bearer <key>'. UNKNOWN answers are free; a useful verdict costs $${price}.`, true);
   }
@@ -119,6 +158,92 @@ async function callCheckReturn(args, env, apiKey, request) {
 
 function toolText(text, isError) {
   return { content: [{ type: "text", text }], isError: !!isError };
+}
+
+// ---------------------------------------------------------------------------
+// W48 — EL RETO DE PAGO, TRADUCIDO AL PROTOCOLO.
+//
+// EL PROBLEMA DE PROTOCOLO. Sobre HTTP el reto viaja en un codigo 402 y en la
+// cabecera PAYMENT-REQUIRED. En MCP no hay ni una cosa ni la otra: todo va por
+// JSON-RPC, y una respuesta de herramienta solo tiene `content`, `isError` y
+// `structuredContent`. Asi que el CONTENIDO del reto se mueve entero a
+// `structuredContent`, que es el sitio que el protocolo tiene para datos que la
+// maquina lee. El `content` en texto queda para quien lo lea un humano.
+//
+// Es el MISMO objeto que el cuerpo del 402 de HTTP —se construye con la misma
+// funcion— asi que un agente que ya sepa leer nuestro 402 no tiene que aprender
+// nada nuevo: reconoce `x402Version` y `accepts` igual que alli.
+//
+// Devuelve null si falta configuracion de cobro. Quien llama decide a que se cae.
+// ---------------------------------------------------------------------------
+function retoMcp(env, request, motivo) {
+  const precio = String(env.PRICE_USD || "0.02");
+  const r = retoConPuertaHumana(env, { url: request.url, motivo, precio });
+  if (!r) return null;
+
+  const base = env.PUBLIC_BASE_URL || "";
+  const texto =
+    "Payment required: " + motivo + " There are two ways to pay, and both are open.\n\n" +
+    "1) x402 (no account, no signup — for autonomous agents). The payment terms are in " +
+    "structuredContent.accepts: amount, asset, network and payTo. Sign that authorization and call " +
+    "check_return again with the base64 envelope in the 'payment_signature' argument. Terms are also " +
+    "published at " + (base ? base : "") + "/.well-known/x402.\n\n" +
+    "2) Email signup (for a human developer). POST your email to " + (base ? base : "") + "/v1/signup " +
+    "to get an API key with free credit, then call with 'Authorization: Bearer <key>'. " +
+    "Details in structuredContent.human_next_steps.\n\n" +
+    "UNKNOWN answers are free on both paths: we do not settle a payment for an answer we could not verify.";
+
+  return {
+    content: [{ type: "text", text: texto }],
+    structuredContent: r.cuerpo,
+    // La llamada NO ha producido un veredicto: para el agente que solo mira esta
+    // bandera, esto es un fallo con instrucciones, no una respuesta.
+    isError: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// W48 — EL COBRO. No hay logica de pago aqui: la que hay esta en cobro-x402.mjs
+// y es LA MISMA que ejecuta /v1/check. Esta funcion solo traduce entrada y salida.
+// ---------------------------------------------------------------------------
+async function pagarConX402(args, env, request) {
+  const precio = String(env.PRICE_USD || "0.02");
+
+  // 1) La firma, por el MISMO verificador del HTTP — incluida la comprobacion de
+  //    que lo aceptado coincide con lo que pedimos, que no se delega en el
+  //    facilitador. Si no cuadra, se devuelve el reto otra vez con el motivo.
+  const firma = validarSobreDePago(args.payment_signature, env, { precio });
+  if (!firma.ok) return retoMcp(env, request, firma.error) || toolText("Payment required: " + firma.error, true);
+  const aceptado = firma.pago.accepted;
+
+  // 2) La peticion, contra el contrato v1.0 sin tocar. `payment_signature` no
+  //    sobrevive a validateRequest: el motor nunca lo ve.
+  const v = validateRequest(args);
+  if (!v.ok) return toolText("Invalid input: " + v.message, true);
+
+  // 3) El cobro compartido.
+  const r = await cobrarConX402(env, {
+    pago: firma.pago, aceptado, peticion: v.value,
+    ruta: new URL(request.url).pathname, precio,
+  });
+
+  if (r.tipo === "conflicto")
+    return toolText("This payment identifier was already used for a different request.", true);
+
+  // Reintento: se devuelve lo ya servido y NO se ha vuelto a cobrar.
+  if (r.tipo === "repetido") {
+    let resp = null;
+    try { resp = JSON.parse(r.cuerpo); } catch (_) { resp = null; }
+    if (!resp) return toolText("Replay of a previous paid call, but the stored answer could not be read.", true);
+    return { content: [{ type: "text", text: r.cuerpo }], structuredContent: resp, isError: false };
+  }
+
+  // Verificacion o liquidacion caida: se vuelve a pedir pago, con el motivo.
+  if (r.tipo === "reto") return retoMcp(env, request, r.motivo) || toolText("Payment required: " + r.motivo, true);
+
+  if (r.tipo === "error") return toolText("Engine error (" + r.code + "): " + r.message + " — not charged.", true);
+
+  return { content: [{ type: "text", text: r.cuerpo }], structuredContent: r.resp, isError: false };
 }
 
 // Procesa un mensaje JSON-RPC individual. Devuelve el objeto respuesta, o null
