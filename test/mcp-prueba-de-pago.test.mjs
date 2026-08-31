@@ -196,9 +196,12 @@ test("W49: payment_response es el MISMO sobre que la cabecera de HTTP", async ()
   assert.equal(dentro.payer, x.payer);
 });
 
-test("W49 SIN LIQUIDACION NO HAY BLOQUE: un UNKNOWN pagado no lo lleva", async () => {
-  // UNKNOWN no se liquida: la autorizacion caduca sin usarse y no se mueve un
-  // centimo. Poner un bloque aqui seria afirmar un pago que no existe.
+test("W49 SIN LIQUIDACION NO HAY BLOQUE: se presento autorizacion, pero con UNKNOWN no se liquido", async () => {
+  // La formulacion importa y por eso el nombre de esta prueba cambio: SE PRESENTO
+  // UNA AUTORIZACION DE PAGO, PERO NO SE PRODUJO LIQUIDACION porque el resultado
+  // fue UNKNOWN. La autorizacion caduca sin usarse y no se mueve un centimo.
+  // "Un UNKNOWN pagado" seria afirmar un pago que no ocurrio; poner un bloque
+  // aqui seria lo mismo, pero escrito en la evidencia.
   const env = { ...ENV_BASE, FREE_TRIAL_ENABLED: "false", DB: db(), AI: ia("UNKNOWN") };
   const res = await conFacilitador({}, () => llamar(env, { payment_signature: sobreDePago() }));
   assert.equal(res.structuredContent.verdict, "UNKNOWN");

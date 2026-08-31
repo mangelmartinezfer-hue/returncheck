@@ -231,8 +231,12 @@ function retoMcp(env, request, motivo) {
 // Por eso:
 //   · tramo gratis  -> nunca pasa por aqui, no hay bloque
 //   · reto 402      -> no hay bloque
-//   · UNKNOWN       -> no hay bloque: la autorizacion caduca sin usarse y NO se
-//                      mueve un centimo, asi que no hay nada que demostrar
+//   · UNKNOWN       -> SE PRESENTO UNA AUTORIZACION DE PAGO, PERO NO SE PRODUJO
+//                      LIQUIDACION porque el resultado fue UNKNOWN. La
+//                      autorizacion caduca sin usarse y no se mueve un centimo,
+//                      asi que no hay pago que demostrar y no hay bloque.
+//                      Presentar una autorizacion NO es haber pagado, y ese es
+//                      justo el matiz que este bloque no puede difuminar.
 //   · confirmed / pending / unconfirmed -> bloque, porque el dinero se movio o
 //                      esta en vuelo, y en los dos casos hay algo que cotejar
 //   · reintento     -> bloque, con la transaccion del cobro ORIGINAL y coste 0
@@ -323,9 +327,10 @@ async function pagarConX402(args, env, request) {
 
   if (r.tipo === "error") return toolText("Engine error (" + r.code + "): " + r.message + " — not charged.", true);
 
-  // Servida. El bloque solo va si hubo liquidacion real: con veredicto UNKNOWN
-  // `estadoLiquidacion` vale "not_charged" y aqui no se adjunta nada, porque no
-  // se movio un centimo y no hay pago que demostrar.
+  // Servida. El bloque solo va si hubo liquidacion real. Con veredicto UNKNOWN
+  // `estadoLiquidacion` vale "not_charged": se presento una autorizacion de pago,
+  // pero NO se produjo liquidacion, asi que aqui no se adjunta nada. Decirlo al
+  // reves —"un UNKNOWN pagado"— seria afirmar un pago que no ocurrio.
   return resultadoConPago(r.resp, bloqueX402({
     estado: r.estadoLiquidacion,
     cabecera: r.cabeceraPago,
