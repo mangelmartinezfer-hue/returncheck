@@ -8,7 +8,7 @@ import { validateRequest } from "./contract.mjs";
 import { runCheck, EngineError } from "./engine.mjs";
 import { getClient, chargeAtomic, markFree } from "./billing.mjs";
 import { freeTrial } from "./freetier.mjs";
-import { x402Activo, validarSobreDePago } from "./x402.mjs";
+import { x402Activo, validarSobreDePago, sacarDelSobre, cabeceraLiquidacion } from "./x402.mjs";
 import { retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.mjs";
 
 const DEFAULT_PROTOCOL = "2025-06-18";
@@ -203,6 +203,74 @@ function retoMcp(env, request, motivo) {
 }
 
 // ---------------------------------------------------------------------------
+// W49 — LA PRUEBA DE QUE SE PAGO, VISIBLE POR MCP.
+//
+// EL HUECO QUE CIERRA. Por HTTP, despues de pagar, el cliente recibe tres
+// cabeceras: PAYMENT-RESPONSE (el sobre con el hash de la transaccion),
+// X-ReturnCheck-Cost y X-ReturnCheck-Settlement. Por MCP no habia nada:
+// `cobrarConX402` ya calculaba las tres cosas y `pagarConX402` las TIRABA, y
+// jsonRpcHttp solo pone content-type y CORS. Resultado: por MCP el hash de la
+// transaccion era inaccesible y una respuesta PAGADA era indistinguible de una
+// del TRAMO GRATIS. Eso rompia la cadena de evidencia justo por la puerta que
+// abrimos en W48.
+//
+// POR QUE VA DENTRO DE structuredContent, Y NO COMO CAMPO HERMANO DE `content`.
+// Esto es deliberado y tiene un coste conocido: structuredContent deja de ser
+// byte a byte identico al cuerpo de /v1/check. NO LO "ARREGLES" SACANDOLO FUERA.
+// La alternativa era ponerlo como hermano de content/structuredContent, lo que
+// mantendria esa identidad, pero un SDK de MCP con tipos estrictos puede
+// DESCARTAR SILENCIOSAMENTE un campo que no conoce — y una evidencia que el
+// cliente no recibe no es una evidencia. Se prefiere perder la identidad byte a
+// byte (que hoy no depende nada de ella) antes que perder el dato.
+// El cuerpo de /v1/check NO cambia: el contrato v1.0 sigue congelado y esto solo
+// existe en el resultado de la herramienta MCP.
+//
+// LA REGLA QUE NO SE PUEDE ROMPER: el bloque aparece SOLO si hubo liquidacion de
+// verdad. Estamos eliminando la ambiguedad "pagado o gratis"; introducirla del
+// reves —que algo gratuito parezca pagado— seria peor que el hueco original.
+// Por eso:
+//   · tramo gratis  -> nunca pasa por aqui, no hay bloque
+//   · reto 402      -> no hay bloque
+//   · UNKNOWN       -> no hay bloque: la autorizacion caduca sin usarse y NO se
+//                      mueve un centimo, asi que no hay nada que demostrar
+//   · confirmed / pending / unconfirmed -> bloque, porque el dinero se movio o
+//                      esta en vuelo, y en los dos casos hay algo que cotejar
+//   · reintento     -> bloque, con la transaccion del cobro ORIGINAL y coste 0
+// ---------------------------------------------------------------------------
+
+// Los estados en los que existe una liquidacion real. "not_charged" NO esta, y
+// esa ausencia es la regla de arriba hecha codigo. "replay" si esta: la
+// liquidacion existio, fue la del cobro original, y su transaccion es cotejable.
+const LIQUIDACION_REAL = new Set(["confirmed", "pending", "unconfirmed", "replay"]);
+
+/**
+ * El bloque de evidencia de pago. Se construye A PARTIR DEL SOBRE, no en
+ * paralelo: asi `transaction`, `network` y `payer` no pueden discrepar de lo que
+ * dice `payment_response`, que es el mismo base64 que viaja por la cabecera
+ * PAYMENT-RESPONSE en HTTP. Devuelve null cuando no hay liquidacion real.
+ */
+function bloqueX402({ estado, cabecera, coste, redPorDefecto }) {
+  if (!LIQUIDACION_REAL.has(estado) || !cabecera) return null;
+  const sobre = sacarDelSobre(cabecera) || {};
+  return {
+    settlement: estado,
+    transaction: sobre.transaction || null,
+    network: sobre.network || redPorDefecto || null,
+    payer: sobre.payer || null,
+    cost_usd: Number(coste || 0).toFixed(4),
+    // El sobre crudo, para que la evidencia por MCP sea identica a la de HTTP.
+    payment_response: cabecera,
+  };
+}
+
+/** Resultado de herramienta con el veredicto y, si la hubo, la prueba del pago. */
+function resultadoConPago(resp, x402) {
+  const cuerpo = x402 ? { ...resp, x402 } : resp;
+  const texto = JSON.stringify(cuerpo);
+  return { content: [{ type: "text", text: texto }], structuredContent: cuerpo, isError: false };
+}
+
+// ---------------------------------------------------------------------------
 // W48 — EL COBRO. No hay logica de pago aqui: la que hay esta en cobro-x402.mjs
 // y es LA MISMA que ejecuta /v1/check. Esta funcion solo traduce entrada y salida.
 // ---------------------------------------------------------------------------
@@ -230,12 +298,24 @@ async function pagarConX402(args, env, request) {
   if (r.tipo === "conflicto")
     return toolText("This payment identifier was already used for a different request.", true);
 
-  // Reintento: se devuelve lo ya servido y NO se ha vuelto a cobrar.
+  // Reintento: se devuelve lo ya servido y NO se ha vuelto a cobrar. La
+  // liquidacion existio —fue la del cobro original— asi que la prueba se
+  // devuelve igual, con su transaccion y coste 0. Es lo mismo que hace HTTP, que
+  // en este caso manda PAYMENT-RESPONSE junto a X-ReturnCheck-Cost: 0.0000.
   if (r.tipo === "repetido") {
     let resp = null;
     try { resp = JSON.parse(r.cuerpo); } catch (_) { resp = null; }
     if (!resp) return toolText("Replay of a previous paid call, but the stored answer could not be read.", true);
-    return { content: [{ type: "text", text: r.cuerpo }], structuredContent: resp, isError: false };
+    const x402 = r.transaccion
+      ? bloqueX402({
+          estado: "replay",
+          cabecera: cabeceraLiquidacion({
+            success: true, transaction: r.transaccion, network: aceptado.network, payer: null }),
+          coste: 0,
+          redPorDefecto: aceptado.network,
+        })
+      : null;
+    return resultadoConPago(resp, x402);
   }
 
   // Verificacion o liquidacion caida: se vuelve a pedir pago, con el motivo.
@@ -243,7 +323,15 @@ async function pagarConX402(args, env, request) {
 
   if (r.tipo === "error") return toolText("Engine error (" + r.code + "): " + r.message + " — not charged.", true);
 
-  return { content: [{ type: "text", text: r.cuerpo }], structuredContent: r.resp, isError: false };
+  // Servida. El bloque solo va si hubo liquidacion real: con veredicto UNKNOWN
+  // `estadoLiquidacion` vale "not_charged" y aqui no se adjunta nada, porque no
+  // se movio un centimo y no hay pago que demostrar.
+  return resultadoConPago(r.resp, bloqueX402({
+    estado: r.estadoLiquidacion,
+    cabecera: r.cabeceraPago,
+    coste: r.coste,
+    redPorDefecto: aceptado.network,
+  }));
 }
 
 // Procesa un mensaje JSON-RPC individual. Devuelve el objeto respuesta, o null
