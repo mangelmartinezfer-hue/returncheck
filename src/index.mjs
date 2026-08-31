@@ -286,7 +286,18 @@ function bearer(request) {
   return m ? m[1].trim() : null;
 }
 
-// 402 "educado": dice CÓMO pagar por las dos vías (fiat ahora, x402 en Fase 2).
+// 402 "educado": dice CÓMO pagar por las dos vías, y las dos están vivas.
+//
+// W50 — ESTE CUERPO MENTÍA. Decía que x402 estaba "not_yet_enabled" y que llegaba
+// "in Phase 2". Es falso desde W46: x402 cobra en Base mainnet. Un cliente que
+// cayera aquí leía que no podía pagar por agente cuando sí podía, y era lo primero
+// que iba a leer un agente ajeno al quedarse sin saldo.
+//
+// CUIDADO CON LA REDACCIÓN, que es donde está la trampa. La rama que de verdad se
+// alcanza en producción es la de CLAVE CON SALDO CERO, y esa petición NO continúa
+// por x402 sola: hay que reenviarla con una autorización firmada. Decir solo
+// `status: "enabled"` haría creer lo contrario, así que la descripción dice cómo
+// se llega de verdad y dice expresamente que no es automático.
 function educated402(env, note) {
   const base = env.PUBLIC_BASE_URL || "";
   return json({
@@ -299,8 +310,12 @@ function educated402(env, note) {
         note: "UNKNOWN answers are free — you only pay for a useful verdict.",
       },
       x402_agentic: {
-        description: "Autonomous agent-to-agent payment (USDC on Base). Coming in Phase 2.",
-        status: "not_yet_enabled",
+        description: "Live on Base mainnet (USDC), no account needed. Send a signed x402 authorization: " +
+          "PAYMENT-SIGNATURE header on POST /v1/check, or the payment_signature argument of the check_return MCP tool. " +
+          `Payment terms are published at ${base}/.well-known/x402. ` +
+          "This is a separate path, not a fallback: a request made with an API key does not switch to x402 on its own — " +
+          "resend it with an authorization. UNKNOWN answers are never settled.",
+        status: "enabled",
       },
     },
   }, { status: 402 });
@@ -951,7 +966,9 @@ export default {
       if (request.method === "POST" && (p === "/v1/check" || p === "/v1/check_return")) return await handleCheck(request, env);
       if (request.method === "GET" && p === "/v1/balance") return await handleBalance(request, env);
       if (request.method === "POST" && p === "/v1/agent/check")
-        return educated402(env, "Agentic x402 endpoint is wired but not yet enabled (Phase 2). Use /v1/check with an API key.");
+        // W50 — esta nota tambien mentia ("wired but not yet enabled"). Esta ruta
+        // nunca llego a ser la de x402; la de verdad es /v1/check con la cabecera.
+        return educated402(env, "This endpoint is not the x402 path. x402 is live on POST /v1/check (PAYMENT-SIGNATURE header) and on the check_return MCP tool (payment_signature argument).");
       if (request.method === "POST" && p === "/webhooks/stripe") return await handleStripeWebhook(request, env);
       // Servidor MCP (Streamable HTTP): descubrimiento y llamada de check_return por agentes.
       if (p === "/mcp") return await handleMcp(request, env);
