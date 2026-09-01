@@ -11,7 +11,7 @@ SIGNUP_FREE_CREDIT_USD = "2.00"  # crédito de prueba al registrarse (~100 consu
 CACHE_TTL_DAYS = "7"        # frescura del extracto de política cacheado
 PUBLIC_BASE_URL = "https://returncheck.m-angelmartinez-fer.workers.dev"
 # --- Aviso de datos y fuentes (/data-policy). Publicos, no son secretos. ---
-CONTACT_EMAIL = "martiplacsystem@gmail.com"   # direccion de reclamacion/borrado
+CONTACT_EMAIL = "returncheckteam@gmail.com"  # proyecto + reclamacion/borrado
 DATA_RETENTION_MONTHS = "48"                  # decision 25 ago 2026 (doc 40)
 # --- W19: registro de respuestas. Retencion MAS CORTA que la del corpus a proposito:
 #     el texto de una politica envejece bien como archivo; el registro de quien

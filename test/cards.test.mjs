@@ -297,6 +297,7 @@ test("sitemap: solo las URLs publicadas, absolutas y con su fecha", async () => 
   assert.match(r.headers.get("content-type") || "", /xml/);
   const x = await r.text();
   assert.match(x, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
+  assert.match(x, new RegExp("<loc>" + BASE + "/</loc>"));
   assert.match(x, new RegExp("<loc>" + BASE + "/cards</loc>"));
   assert.match(x, new RegExp("<loc>" + BASE + "/cards/" + PUBLICADA + "</loc>"));
   assert.match(x, /<lastmod>2026-08-20<\/lastmod>/);

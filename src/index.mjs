@@ -5,7 +5,7 @@
 //   GET  /v1/balance           -> saldo del cliente (auth)
 //   POST /v1/agent/check       -> x402 DORMIDO: 402 educado (Fase 2)
 //   POST /webhooks/stripe      -> recarga de saldo
-//   GET  /                     -> info
+//   GET  /                     -> public landing page (JSON with Accept: application/json)
 
 import { validateRequest } from "./contract.mjs";
 import { runCheck, EngineError } from "./engine.mjs";
@@ -26,6 +26,7 @@ import { puertaHumana, retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.m
 import { inferenceParams } from "./prompt.mjs";
 import { sondearTanda, resumir } from "./adquisicion.mjs";
 import { fichaPublicada, paginaFicha, gemeloJson, paginaIndice, indiceJson, sitemap, pagina404 } from "./cards.mjs";
+import { landingPage } from "./landing.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
 
@@ -409,6 +410,34 @@ function dataPolicy(env) {
   });
 }
 
+// The original root response was the machine-readable discovery document. The
+// public home page now owns GET /, but the JSON remains available explicitly at
+// /discovery.json and through normal HTTP content negotiation. That keeps the
+// browser experience useful without silently breaking existing agents.
+function discoveryDocument(env) {
+  return {
+    name: "ReturnCheck",
+    build: BUILD,
+    model: env.AI_MODEL || "default-8b-fast",
+    temperature: inferenceParams(env).temperature,
+    candidate_clauses: String(env.USE_CANDIDATES ?? "true") !== "false",
+    mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
+    data_policy: (env.PUBLIC_BASE_URL || "") + "/data-policy",
+    free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
+    browser_fallback: String(env.USE_BROWSER || "false") === "true",
+    question: "Can this specific product actually be returned?",
+    endpoints: { check: "POST /v1/check", signup: "POST /v1/signup", balance: "GET /v1/balance" },
+    price_usd_per_call: Number(env.PRICE_USD || "0.02"),
+    unknown_is_free: true,
+  };
+}
+
+function wantsDiscoveryJson(request, url) {
+  if (url.searchParams.get("format") === "json") return true;
+  const accept = request.headers.get("accept") || "";
+  return /(^|,)\s*application\/(?:[a-z0-9.+-]*\+)?json\s*(?:;|,|$)/i.test(accept);
+}
+
 // Manifiesto en texto para agentes/LLMs que rastrean el dominio.
 // ---- W52: FICHAS DE EVIDENCIA ----
 //
@@ -476,6 +505,13 @@ function cardRoute(env, url, p) {
 function sitemapXml(env, url) {
   return new Response(sitemap(baseDe(env, url)), {
     headers: { "content-type": "application/xml; charset=utf-8", ...CARD_HEADERS },
+  });
+}
+
+function robotsTxt(env, url) {
+  const base = baseDe(env, url);
+  return new Response(`User-agent: *\nAllow: /\n\nSitemap: ${base}/sitemap.xml\n`, {
+    headers: { "content-type": "text/plain; charset=utf-8", ...CARD_HEADERS },
   });
 }
 
@@ -1055,6 +1091,12 @@ export default {
       // Manifiestos de descubrimiento para agentes/crawlers.
       if (request.method === "GET" && p === "/llms.txt") return llmsTxt(env);
       if (request.method === "GET" && p === "/data-policy") return dataPolicy(env);
+      if (request.method === "GET" && p === "/discovery.json")
+        return json(discoveryDocument(env), { headers: { "access-control-allow-origin": "*" } });
+      if (request.method === "GET" && p === "/")
+        return wantsDiscoveryJson(request, url)
+          ? json(discoveryDocument(env), { headers: { "access-control-allow-origin": "*", vary: "accept" } })
+          : landingPage(env, url);
       if (request.method === "GET" && (p === "/openapi.json" || p === "/.well-known/openapi.json")) return openapi(env);
       if (request.method === "GET" && (p === "/.well-known/ai-plugin.json" || p === "/ai-plugin.json")) return aiPluginJson(env);
       if (request.method === "GET" && (p === "/agents.json" || p === "/.well-known/agents.json")) return agentsJson(env);
@@ -1069,6 +1111,7 @@ export default {
       if (request.method === "GET" && p === "/cards.json") return cardsIndexJson(env, url);
       if (request.method === "GET" && p.startsWith("/cards/")) return cardRoute(env, url, p);
       if (request.method === "GET" && p === "/sitemap.xml") return sitemapXml(env, url);
+      if (request.method === "GET" && p === "/robots.txt") return robotsTxt(env, url);
       // Panel de control (protegido con clave de administrador).
       if (request.method === "GET" && p === "/stats") return await handleStats(request, env, url);
       // W16 — AVISOS DE CAMBIO DE POLITICA. Se PIDEN, no se empujan: un agente es
@@ -1237,21 +1280,6 @@ export default {
           }, { status: 200 });
         }
       }
-      if (p === "/") return json({
-        name: "ReturnCheck",
-        build: BUILD,      // marcador de versión para verificar el deploy
-        model: env.AI_MODEL || "default-8b-fast",
-        temperature: inferenceParams(env).temperature,   // W05: qué rama del experimento está viva
-        candidate_clauses: String(env.USE_CANDIDATES ?? "true") !== "false",
-        mcp_endpoint: (env.PUBLIC_BASE_URL || "") + "/mcp",
-        data_policy: (env.PUBLIC_BASE_URL || "") + "/data-policy",
-        free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
-        browser_fallback: String(env.USE_BROWSER || "false") === "true",
-        question: "Can this specific product actually be returned?",
-        endpoints: { check: "POST /v1/check", signup: "POST /v1/signup", balance: "GET /v1/balance" },
-        price_usd_per_call: Number(env.PRICE_USD || "0.02"),
-        unknown_is_free: true,
-      });
       return errorResponse("INVALID_INPUT", "Not found.", 404);
     } catch (e) {
       return errorResponse("INTERNAL", "Unexpected error.", 500);

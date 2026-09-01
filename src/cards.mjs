@@ -443,6 +443,7 @@ export function indiceJson(base) {
 // /llms.txt, que es donde miran los agentes.
 export function sitemap(base) {
   const urls = [
+    { loc: base + "/", lastmod: "2026-09-01" },
     { loc: base + "/cards", lastmod: null },
     ...fichasPublicadas().map((c) => ({
       loc: base + "/cards/" + c.card_id,

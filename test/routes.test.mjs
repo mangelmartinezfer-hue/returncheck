@@ -11,7 +11,7 @@ import worker from "../src/index.mjs";
 
 const ENV = {
   PUBLIC_BASE_URL: "https://rc.example",
-  CONTACT_EMAIL: "martiplacsystem@gmail.com",
+  CONTACT_EMAIL: "returncheckteam@gmail.com",
   DATA_RETENTION_MONTHS: "48",
   PRICE_USD: "0.02",
 };
@@ -25,7 +25,7 @@ test("aviso: /data-policy se sirve como texto plano", async () => {
 
 test("aviso: lleva la dirección de reclamación y el plazo de conservación", async () => {
   const t = await (await get("/data-policy")).text();
-  assert.match(t, /martiplacsystem@gmail\.com/);
+  assert.match(t, /returncheckteam@gmail\.com/);
   assert.match(t, /48 months/);
 });
 
@@ -52,26 +52,59 @@ test("aviso: el plazo y el correo salen de la configuración, no están fijos en
   assert.match(t, /12 months/);
 });
 
-test("descubrimiento: / enlaza el aviso", async () => {
-  const j = await (await get("/")).json();
+test("portada: / sirve HTML público con la propuesta y los dos CTA", async () => {
+  const r = await get("/");
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type") || "", /text\/html/);
+  assert.match(r.headers.get("content-security-policy") || "", /default-src 'none'/);
+  const t = await r.text();
+  assert.match(t, /Return decisions your agent can verify/i);
+  assert.match(t, /Request a 2-case sample/i);
+  assert.match(t, /\/openapi\.json/);
+  assert.match(t, /returncheckteam@gmail\.com/);
+  assert.match(t, /YES_WITH_CONDITIONS/);
+  assert.match(t, /UNKNOWN/);
+});
+
+test("descubrimiento: / conserva JSON por negociación de contenido", async () => {
+  const r = await worker.fetch(new Request("https://rc.example/", {
+    headers: { accept: "application/json" },
+  }), ENV);
+  assert.match(r.headers.get("content-type") || "", /application\/json/);
+  const j = await r.json();
   assert.equal(j.data_policy, "https://rc.example/data-policy");
+});
+
+test("descubrimiento: /discovery.json enlaza el aviso y el MCP", async () => {
+  const j = await (await get("/discovery.json")).json();
+  assert.equal(j.data_policy, "https://rc.example/data-policy");
+  assert.equal(j.mcp_endpoint, "https://rc.example/mcp");
+  assert.equal(j.unknown_is_free, true);
 });
 
 test("descubrimiento: agents.json enlaza el aviso y lleva el correo real", async () => {
   const j = await (await get("/agents.json")).json();
   assert.equal(j.data_policy, "https://rc.example/data-policy");
-  assert.equal(j.contact_email, "martiplacsystem@gmail.com");
+  assert.equal(j.contact_email, "returncheckteam@gmail.com");
 });
 
 test("descubrimiento: ai-plugin.json ya no lleva el correo inventado", async () => {
   const j = await (await get("/.well-known/ai-plugin.json")).json();
-  assert.equal(j.contact_email, "martiplacsystem@gmail.com");
+  assert.equal(j.contact_email, "returncheckteam@gmail.com");
   assert.equal(j.legal_info_url, "https://rc.example/data-policy");
 });
 
 test("descubrimiento: llms.txt enlaza el aviso", async () => {
   const t = await (await get("/llms.txt")).text();
   assert.match(t, /\/data-policy/);
+});
+
+test("descubrimiento: robots.txt permite la portada y enlaza el sitemap", async () => {
+  const r = await get("/robots.txt");
+  assert.match(r.headers.get("content-type") || "", /text\/plain/);
+  const t = await r.text();
+  assert.match(t, /Allow: \/$/m);
+  assert.match(t, /https:\/\/rc\.example\/sitemap\.xml/);
 });
 
 // No regresión: el aviso no puede haber roto nada de lo que ya funcionaba.
