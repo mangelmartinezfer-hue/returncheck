@@ -18,7 +18,10 @@ const BASE = "https://rc.example";
 const ENV = { PUBLIC_BASE_URL: BASE, PRICE_USD: "0.02" };
 const get = (path, env = ENV) => worker.fetch(new Request(BASE + path), env);
 
-const PUBLICADA = "rc-card-target-who-sold-it";
+const TARGET = "rc-card-target-who-sold-it";
+const PUBLICADA = "rc-card-ebay-seller-decides";
+const EBAY = PUBLICADA;
+const COSTCO = "rc-card-costco-satisfaction-guaranteed";
 
 // EL CANARIO. Una ficha sin publicar, metida en el registro SOLO durante la prueba.
 //
@@ -143,36 +146,33 @@ test("la ficha lleva la clausula literal, su fuente y su fecha, en las dos caras
   const html = await (await get("/cards/" + PUBLICADA)).text();
   const j = JSON.parse(await (await get("/cards/" + PUBLICADA + ".json")).text());
 
-  assert.match(html, /returned within 90 days will receive a refund or exchange/);
-  assert.match(html, /target\.com\/help\/articles\/returns-exchanges\/returns/);
+  assert.match(html, /30 calendar days after the estimated or actual delivery date/);
+  assert.match(html, /ebay\.com\/help\/policies\/ebay-money-back-guarantee-policy/);
   assert.match(html, /2026-08-20/);
 
   assert.equal(j.verified_on, "2026-08-20");
   assert.match(j.warning, /policies may change/i);
   const dias = j.outcomes.map((o) => o.days);
-  assert.deepEqual(dias, [90, 30, 365]);
+  assert.deepEqual(dias, [undefined, 30, undefined]);
 });
 
-test("una nota NUNCA se sirve como cita: va en `note`, no en `clause`", async () => {
-  const j = JSON.parse(await (await get("/cards/" + PUBLICADA + ".json")).text());
-  const abiertos = j.denials.find((d) => /opened/i.test(d.scope));
-  assert.ok(abiertos, "debe estar el bloque de articulos abiertos");
-  assert.equal(abiertos.clause, undefined);
-  assert.match(abiertos.note, /may be denied/i);
+test("Target queda despublicada en HTML y JSON hasta corregir sus excepciones", async () => {
+  assert.equal(CARDS.get(TARGET).published, false);
+  assert.equal((await get("/cards/" + TARGET)).status, 404);
+  assert.equal((await get("/cards/" + TARGET + ".json")).status, 404);
 });
 
 // ---------------------------------------------------------------------------
 // Las otras dos fichas — y lo que tienen de raro
 // ---------------------------------------------------------------------------
 
-const EBAY = "rc-card-ebay-seller-decides";
-const COSTCO = "rc-card-costco-satisfaction-guaranteed";
-
-test("las tres fichas del orden acordado estan publicadas y responden 200", async () => {
-  for (const id of [PUBLICADA, EBAY, COSTCO]) {
+test("eBay y Costco siguen publicadas; Target queda fuera", async () => {
+  for (const id of [EBAY, COSTCO]) {
     assert.equal((await get("/cards/" + id)).status, 200, id);
     assert.equal((await get("/cards/" + id + ".json")).status, 200, id + ".json");
   }
+  assert.equal((await get("/cards/" + TARGET)).status, 404);
+  assert.equal((await get("/cards/" + TARGET + ".json")).status, 404);
 });
 
 test("SIN NUMERO INVENTADO: si la clausula no da plazo, no hay `days` ni `basis`", async () => {
@@ -248,8 +248,11 @@ test("marcado: la ficha se marca como Article, NUNCA como MerchantReturnPolicy",
   assert.ok(m, "debe haber JSON-LD");
   const ld = JSON.parse(m[1].replace(/\\u003c/g, "<"));
   assert.equal(ld["@type"], "Article");
-  assert.equal(ld.isBasedOn, "https://www.target.com/help/articles/returns-exchanges/returns");
-  assert.equal(ld.about.name, "Target");
+  assert.equal(
+    ld.isBasedOn,
+    "https://www.ebay.com/help/policies/ebay-money-back-guarantee-policy/ebay-money-back-guarantee-policy?id=4210"
+  );
+  assert.equal(ld.about.name, "eBay");
   assert.doesNotMatch(html, /MerchantReturnPolicy/);
 });
 
@@ -263,21 +266,22 @@ test("marcado: el indice se marca como Dataset, tampoco como MerchantReturnPolic
 
 test("marcado: la pagina declara su gemelo JSON como alternate", async () => {
   const html = await (await get("/cards/" + PUBLICADA)).text();
-  assert.match(html, /<link rel="alternate" type="application\/json" href="[^"]*\/cards\/rc-card-target-who-sold-it\.json">/);
+  assert.match(html, /<link rel="alternate" type="application\/json" href="[^"]*\/cards\/rc-card-ebay-seller-decides\.json">/);
 });
 
 test("la ficha dice que no somos el comercio", async () => {
   const html = await (await get("/cards/" + PUBLICADA)).text();
-  assert.match(html, /independent and not affiliated with Target/i);
+  assert.match(html, /independent and not affiliated with eBay/i);
 });
 
 // ---------------------------------------------------------------------------
 // Indice y sitemap
 // ---------------------------------------------------------------------------
 
-test("indice: lista la publicada y NO la que esta sin publicar", async () => {
+test("indice: lista las publicadas y NO Target ni el canario", async () => {
   const html = await (await get("/cards")).text();
   assert.match(html, new RegExp(PUBLICADA));
+  assert.doesNotMatch(html, new RegExp(TARGET));
   assert.doesNotMatch(html, new RegExp(SIN_PUBLICAR));
 });
 
@@ -285,6 +289,7 @@ test("indice JSON: mismas fichas, con las dos URLs de cada una", async () => {
   const j = JSON.parse(await (await get("/cards.json")).text());
   assert.equal(j.count, j.cards.length);
   assert.ok(j.cards.some((c) => c.card_id === PUBLICADA));
+  assert.ok(!j.cards.some((c) => c.card_id === TARGET));
   assert.ok(!j.cards.some((c) => c.card_id === SIN_PUBLICAR));
   const c = j.cards.find((x) => x.card_id === PUBLICADA);
   assert.equal(c.html_url, BASE + "/cards/" + PUBLICADA);
@@ -301,6 +306,7 @@ test("sitemap: solo las URLs publicadas, absolutas y con su fecha", async () => 
   assert.match(x, new RegExp("<loc>" + BASE + "/cards</loc>"));
   assert.match(x, new RegExp("<loc>" + BASE + "/cards/" + PUBLICADA + "</loc>"));
   assert.match(x, /<lastmod>2026-08-20<\/lastmod>/);
+  assert.doesNotMatch(x, new RegExp(TARGET));
   assert.doesNotMatch(x, new RegExp(SIN_PUBLICAR));
 });
 

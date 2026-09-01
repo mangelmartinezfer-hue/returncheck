@@ -18,8 +18,10 @@ export default {
   merchant_name: "Target",
   country: "US",
 
-  // LA PUERTA. Nada se sirve sin que Miguel ponga esto a true a mano.
-  published: true,
+  // LA PUERTA. Despublicada el 1 sep 2026: la revision detecto excepciones que
+  // esta version aun no representa (Circle Card, electronica y Apple/Beats).
+  // Vuelve a true solo despues de corregir las clausulas y revisar el diff.
+  published: false,
 
   verified_on: "2026-08-20",
   source_url: "https://www.target.com/help/articles/returns-exchanges/returns",

@@ -45,6 +45,8 @@ export function landingPage(env, url) {
   ].join("\n");
   const sampleHref = `mailto:${encodeURIComponent(contact)}?subject=${encodeURIComponent("ReturnCheck — 2-case sample")}&body=${encodeURIComponent(emailBody)}`;
   const canonical = base + "/";
+  const holdoutEvidence =
+    "https://github.com/mangelmartinezfer-hue/returncheck/blob/main/evaluaciones/README.md";
 
   const html = `<!doctype html>
 <html lang="en">
@@ -172,6 +174,17 @@ export function landingPage(env, url) {
     .trust-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
     .trust-card .icon { color: var(--blue-2); font-size: 1.3rem; }
     .trust-card h3 { margin-top: 16px; }
+    .benchmark { margin-top: 20px; padding: 27px; background: linear-gradient(145deg, rgba(20, 49, 96, .86), rgba(9, 29, 61, .86)); border: 1px solid rgba(121, 169, 255, .28); border-radius: var(--radius); }
+    .benchmark-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+    .benchmark-head h3 { margin: 6px 0 0; font-size: clamp(1.35rem, 2.5vw, 2rem); letter-spacing: -.035em; }
+    .benchmark-head p { max-width: 460px; margin: 0; color: var(--muted); font-size: .9rem; }
+    .benchmark-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+    .benchmark-stat { padding: 20px; border-right: 1px solid var(--line); }
+    .benchmark-stat:last-child { border-right: 0; }
+    .benchmark-stat b { display: block; color: white; font-size: clamp(1.55rem, 3vw, 2.25rem); letter-spacing: -.045em; }
+    .benchmark-stat span { display: block; color: var(--muted); font-size: .78rem; line-height: 1.35; }
+    .benchmark-note { margin: 18px 0 0; color: var(--faint); font-size: .82rem; }
+    .benchmark-note a { color: var(--blue-2); font-weight: 700; text-underline-offset: 3px; }
     .measure { margin-top: 17px; padding: 20px 22px; color: var(--muted); background: rgba(91, 156, 255, .07); border: 1px solid rgba(91, 156, 255, .2); border-radius: 16px; font-size: .91rem; }
     .measure strong { color: white; }
     .final { padding-top: 48px; }
@@ -188,6 +201,11 @@ export function landingPage(env, url) {
       .steps, .trust-grid { grid-template-columns: 1fr; }
       .evidence { grid-template-columns: 1fr; }
       .quote { max-width: 650px; transform: none; }
+      .benchmark-head { display: block; }
+      .benchmark-head p { margin-top: 10px; }
+      .benchmark-grid { grid-template-columns: repeat(2, 1fr); }
+      .benchmark-stat:nth-child(2) { border-right: 0; }
+      .benchmark-stat:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
     }
     @media (max-width: 680px) {
       .wrap { width: min(100% - 28px, 1160px); }
@@ -201,6 +219,9 @@ export function landingPage(env, url) {
       .stat:last-child { border-bottom: 0; }
       section { padding: 68px 0; }
       .interface-grid { grid-template-columns: 1fr; }
+      .benchmark-grid { grid-template-columns: 1fr; }
+      .benchmark-stat, .benchmark-stat:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--line); }
+      .benchmark-stat:last-child { border-bottom: 0; }
       .row { grid-template-columns: 1fr; gap: 3px; }
       .cta { grid-template-columns: 1fr; padding: 30px 24px; }
       .cta .button { width: 100%; }
@@ -331,7 +352,20 @@ tool: check_return</code></pre>
         <article class="trust-card"><div class="icon" aria-hidden="true">?</div><h3>UNKNOWN is a result</h3><p>Missing seller, conflicting policy or insufficient evidence stays unresolved instead of becoming a fabricated yes or no.</p></article>
         <article class="trust-card"><div class="icon" aria-hidden="true">↻</div><h3>Dated evidence</h3><p>Policy language is recorded with its source and verification date so the answer can be audited later.</p></article>
       </div>
-      <div class="measure"><strong>Measured, not estimated.</strong> In a frozen sample of 50 US retailers on August 28, 2026, server-side retrieval reached the policy for 17 of 50. Passing <code>page_text</code> or <code>page_html</code> lets ReturnCheck verify the page your agent already rendered instead of depending on that retrieval step.</div>
+      <div class="benchmark" aria-label="Frozen holdout results">
+        <div class="benchmark-head">
+          <div><span class="kicker">Frozen holdout · 31 August 2026</span><h3>125 measured calls. Zero unsafe answers.</h3></div>
+          <p>The same 25 hand-labelled cases were run five times against the production engine with supplied policy text.</p>
+        </div>
+        <div class="benchmark-grid">
+          <div class="benchmark-stat"><b>0</b><span>unsafe errors</span></div>
+          <div class="benchmark-stat"><b>0</b><span>hallucinated clauses</span></div>
+          <div class="benchmark-stat"><b>100%</b><span>precision on determinate verdicts</span></div>
+          <div class="benchmark-stat"><b>72% / 80%</b><span>coverage / benchmark ceiling</span></div>
+        </div>
+        <p class="benchmark-note">The 80% ceiling is built into the set: 5 of 25 cases correctly expect UNKNOWN. The holdout was authored and run by the ReturnCheck team, not an external evaluator. All five raw JSON runs—including the misses—are <a href="${esc(holdoutEvidence)}">public in the repository</a>. This deployment also passed 448 automated tests.</p>
+      </div>
+      <div class="measure"><strong>Retrieval boundary, also measured.</strong> In a separate frozen sample of 50 US retailers on August 28, 2026, server-side retrieval reached the policy for 17 of 50. This measures page acquisition—not verdict quality. Passing <code>page_text</code> or <code>page_html</code> lets ReturnCheck verify the page your agent already rendered instead of depending on that retrieval step.</div>
     </section>
 
     <section class="wrap final">

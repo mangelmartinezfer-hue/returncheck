@@ -64,6 +64,13 @@ test("portada: / sirve HTML público con la propuesta y los dos CTA", async () =
   assert.match(t, /returncheckteam@gmail\.com/);
   assert.match(t, /YES_WITH_CONDITIONS/);
   assert.match(t, /UNKNOWN/);
+  assert.match(t, /125 measured calls/i);
+  assert.match(t, /zero unsafe answers/i);
+  assert.match(t, /100%/);
+  assert.match(t, /72% \/ 80%/);
+  assert.match(t, /all five raw JSON runs/i);
+  assert.match(t, /448 automated tests/i);
+  assert.match(t, /page acquisition.not verdict quality/is);
 });
 
 test("descubrimiento: / conserva JSON por negociación de contenido", async () => {
