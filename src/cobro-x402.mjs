@@ -23,6 +23,7 @@ import { retoDePago, cabeceraLiquidacion } from "./x402.mjs";
 import { verificarPago, liquidarPago, veredictoCobrable } from "./facilitador.mjs";
 import { leerIdentificador, huella, consultar as consultarIdem, guardar as guardarIdem } from "./idempotencia.mjs";
 import { markAnswerCharged } from "./answerlog.mjs";
+import { registrarLiquidacion } from "./liquidaciones.mjs";
 
 /**
  * La puerta humana del 402.
@@ -164,6 +165,32 @@ export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, preci
     // aparece en la lista de conciliación.
     await markAnswerCharged(env, checkId, coste, liq.cobrado ? true : null);
     estadoLiquidacion = liq.cobrado ? "confirmed" : (liq.incierto ? "unconfirmed" : "pending");
+
+    // W57 — LA EVIDENCIA, GUARDADA AQUI Y NO EN CADA TRANSPORTE.
+    //
+    // Va en el camino COMPARTIDO, justo despues de /settle, por la misma razon
+    // por la que este modulo existe: si se escribiera en index.mjs y en mcp.mjs,
+    // una de las dos se quedaria sin el arreglo la primera vez que alguien toque
+    // solo la otra, y nadie lo notaria hasta necesitar la fila.
+    //
+    // NO DEPENDE DE `payment_idempotency`: se escribe siempre que haya habido
+    // liquidacion, mande el comprador `payment-identifier` o no. Ese era
+    // justamente el agujero — la extension es nuestra y opcional, y sin ella no
+    // quedaba ni una linea que uniera la respuesta con la transaccion.
+    //
+    // LOS TRES ESTADOS ENTRAN. `pending` y `unconfirmed` son "no lo se", no
+    // fallos: el dinero puede estar en vuelo y hay algo que conciliar. Guardar
+    // solo los confirmados dejaria fuera precisamente los casos en los que la
+    // fila hace falta.
+    //
+    // UNKNOWN NO LLEGA AQUI, y no por un `if` de mas: este bloque entero cuelga
+    // de `veredictoCobrable`. Un UNKNOWN no se liquida, asi que no hay
+    // liquidacion que registrar. La rama `else` de abajo no escribe nada.
+    await registrarLiquidacion(env, {
+      checkId, estado: estadoLiquidacion, liquidacion: liq,
+      autorizacion: (pago && pago.payload && pago.payload.authorization) || null,
+      aceptado,
+    });
   } else {
     await markAnswerCharged(env, checkId, 0, false);
     cabeceraPago = cabeceraLiquidacion({
