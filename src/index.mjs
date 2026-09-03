@@ -21,7 +21,7 @@ import { clauseInText } from "./text.mjs";
 import { corpusStats, deleteMerchantCorpus, sha256full } from "./corpus.mjs";
 import { addWatch, removeWatch, listWatches, changesFor } from "./watch.mjs";
 import { findAnswers, answerStats, markAnswerCharged, purgeExpiredAnswers, deleteClientAnswers, pendingSettlements } from "./answerlog.mjs";
-import { x402Activo, requisitosDePago, leerFirmaDePago, meterEnSobre, cabeceraLiquidacion, X402_VERSION } from "./x402.mjs";
+import { x402Activo, requisitosDePago, recursoDePago, leerFirmaDePago, meterEnSobre, cabeceraLiquidacion, X402_VERSION } from "./x402.mjs";
 import { puertaHumana, retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.mjs";
 import { inferenceParams } from "./prompt.mjs";
 import { sondearTanda, resumir } from "./adquisicion.mjs";
@@ -673,11 +673,9 @@ function wellKnownX402(env) {
   const base = env.PUBLIC_BASE_URL || "";
   return json({
     x402Version: X402_VERSION,
-    resource: {
-      url: base ? base + "/v1/check" : "/v1/check",
-      description: "ReturnCheck — can this specific product actually be returned?",
-      mimeType: "application/json",
-    },
+    // W56 — el MISMO constructor que usa el reto y que usa el sobre que va al
+    // facilitador. Aqui habia una copia escrita a mano de la descripcion.
+    resource: recursoDePago(env),
     accepts,
     // Los DOS sitios donde se puede gastar esa firma. Se listan porque este lote
     // es justamente el que hace pagable el MCP: publicar solo el HTTP dejaria la

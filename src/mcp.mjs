@@ -384,10 +384,10 @@ function resultadoConPago(resp, ev) {
  * que falte el pago sino que el cliente ha mandado dos pagos distintos. Servir
  * uno de los dos seria decidir por el cliente a que esta autorizando.
  */
-function resolverPago(env, { pagoMeta, pagoArg }, precio) {
+function resolverPago(env, { pagoMeta, pagoArg }, precio, url = null) {
   const deMeta = pagoMeta !== undefined && pagoMeta !== null
-    ? validarPagoDecodificado(pagoMeta, env, { precio }) : null;
-  const deArg = pagoArg ? validarSobreDePago(pagoArg, env, { precio }) : null;
+    ? validarPagoDecodificado(pagoMeta, env, { precio, url }) : null;
+  const deArg = pagoArg ? validarSobreDePago(pagoArg, env, { precio, url }) : null;
 
   if (deMeta && !deMeta.ok) return deMeta;
   if (deArg && !deArg.ok) return deArg;
@@ -411,7 +411,10 @@ async function pagarConX402(args, env, request, vehiculos) {
   // 1) El pago, venga por _meta o por el argumento, por el MISMO verificador del
   //    HTTP — incluida la comprobacion de que lo aceptado coincide con lo que
   //    pedimos, que no se delega en el facilitador.
-  const firma = resolverPago(env, vehiculos, precio);
+  // W56 — la url va con el pago: el `resource` que sale hacia el facilitador es
+  // el de ESTE recurso (/mcp), no el de HTTP. Los dos vehiculos reciben la misma,
+  // asi que la comparacion por ambiguedad de mas abajo sigue comparando iguales.
+  const firma = resolverPago(env, vehiculos, precio, request && request.url);
   if (!firma.ok) {
     // La ambiguedad NO es un reto: no falta el pago, sobran. Se dice y se para.
     if (firma.ambiguo) return toolText(firma.error, true);

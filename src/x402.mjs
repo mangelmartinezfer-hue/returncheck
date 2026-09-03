@@ -123,17 +123,36 @@ export function requisitosDePago(env, { precio = null } = {}) {
   }];
 }
 
+/**
+ * W56 — EL RECURSO QUE SE COBRA, EN UN SOLO SITIO.
+ *
+ * Sale de aqui y de ningun otro lado: lo usa el reto (`retoDePago`), lo usa el
+ * anuncio de /.well-known/x402, y lo usa el sobre que va al facilitador
+ * (`validarPagoDecodificado`). Antes habia DOS constructores con la misma
+ * descripcion escrita a mano —uno aqui y otro en index.mjs— y esa es
+ * exactamente la clase de duplicado que se separa a la primera correccion que
+ * solo toca uno. Mismo criterio que en W51 con el sobre de liquidacion: dos
+ * representaciones, una sola fuente.
+ *
+ * `url` es el recurso concreto que se esta pagando: /v1/check por HTTP, /mcp
+ * por MCP. Sin ella se cae al de HTTP, que es el que anuncia el .well-known.
+ */
+export function recursoDePago(env, { url = null } = {}) {
+  const base = (env && env.PUBLIC_BASE_URL) || "";
+  return {
+    url: url || (base ? base + "/v1/check" : "/v1/check"),
+    description: "ReturnCheck — can this specific product actually be returned?",
+    mimeType: "application/json",
+  };
+}
+
 export function retoDePago(env, { url, error = "PAYMENT-SIGNATURE header is required", precio = null } = {}) {
   const accepts = requisitosDePago(env, { precio });
   if (!accepts) return null;
   return {
     x402Version: X402_VERSION,
     error,
-    resource: {
-      url,
-      description: "ReturnCheck — can this specific product actually be returned?",
-      mimeType: "application/json",
-    },
+    resource: recursoDePago(env, { url }),
     accepts,
   };
 }
@@ -181,12 +200,12 @@ export function aceptadoCoincide(aceptado, requisitos) {
  *
  * Devuelve { ok:false, error } o { ok:true, pago }.
  */
-export function validarSobreDePago(cabecera, env, { precio = null } = {}) {
+export function validarSobreDePago(cabecera, env, { precio = null, url = null } = {}) {
   if (!cabecera) return { ok: false, error: "PAYMENT-SIGNATURE header is required" };
 
   const pago = sacarDelSobre(cabecera);
   if (!pago) return { ok: false, error: "PAYMENT-SIGNATURE is not valid base64 JSON." };
-  return validarPagoDecodificado(pago, env, { precio });
+  return validarPagoDecodificado(pago, env, { precio, url });
 }
 
 /**
@@ -202,7 +221,7 @@ export function validarSobreDePago(cabecera, env, { precio = null } = {}) {
  * `validarSobreDePago` decodifica y llama a esta; quien ya tiene el objeto la
  * llama directamente. Un solo camino de validacion, dos puertas de entrada.
  */
-export function validarPagoDecodificado(pago, env, { precio = null } = {}) {
+export function validarPagoDecodificado(pago, env, { precio = null, url = null } = {}) {
   if (!pago || typeof pago !== "object" || Array.isArray(pago))
     return { ok: false, error: "Payment payload must be an object." };
   if (Number(pago.x402Version) !== X402_VERSION)
@@ -215,7 +234,35 @@ export function validarPagoDecodificado(pago, env, { precio = null } = {}) {
   if (!aceptadoCoincide(pago.accepted, requisitos))
     return { ok: false, error: "The accepted payment terms do not match this server's requirements." };
 
-  return { ok: true, pago };
+  // W56 — EL SOBRE SALE CON `resource`, Y NO SE LE PIDE AL COMPRADOR.
+  //
+  // POR QUE. La especificacion x402 v2 marca `resource` como OPCIONAL dentro del
+  // PaymentPayload. Mogami, nuestro facilitador, lo EXIGE: sin el responde
+  // `invalid_payload`, que es el mismo mensaje que da una firma falsa. Medido en
+  // Base mainnet el 3 sep 2026 con una firma real: la firma recuperaba
+  // correctamente al firmante y `transferWithAuthorization` simulado con
+  // `eth_call` PASABA contra el contrato USDC, y aun asi Mogami la rechazaba.
+  // Con `resource` puesto, `isValid: true` y el pago entro a la primera.
+  // Eso costo una tarde de diagnostico, y por eso esta escrito aqui: el sintoma
+  // apunta al comprador y la causa esta en nuestro lado.
+  //
+  // SE ANADE AQUI, DESPUES DE LA FIRMA, y eso no es un detalle de comodidad. Lo
+  // firmado es la autorizacion EIP-3009 —quien, cuanto, a quien, hasta cuando,
+  // con que nonce—; `resource` va fuera de ella, igual que las extensiones. Si
+  // se le pidiera al comprador que lo incluyera ANTES de firmar, cambiaria lo
+  // que ve y autoriza en su cartera, y ningun cliente x402 existente lo manda
+  // porque la especificacion no lo obliga.
+  //
+  // SALE DEL MISMO SITIO QUE EL DEL RETO (`recursoDePago`) para que no puedan
+  // divergir: si se construyera aparte, el recurso que anunciamos y el que
+  // declaramos al cobrar acabarian diciendo cosas distintas.
+  //
+  // ES ADICION, NO REQUISITO: un sobre que llegue SIN `resource` se acepta
+  // exactamente igual que antes —no se rechaza nada nuevo— y se le pone el
+  // nuestro al salir. Si el comprador manda uno, el nuestro manda: el recurso es
+  // el que nosotros servimos, y una sola fuente vale mas que respetar un valor
+  // que no podemos comprobar.
+  return { ok: true, pago: { ...pago, resource: recursoDePago(env, { url }) } };
 }
 
 /**
@@ -223,8 +270,12 @@ export function validarPagoDecodificado(pago, env, { precio = null } = {}) {
  * Envoltorio de `validarSobreDePago` para el transporte HTTP: se conserva tal
  * cual estaba porque es lo que usa /v1/check, que esta en produccion cobrando.
  */
-export function leerFirmaDePago(request, env, { precio = null } = {}) {
-  return validarSobreDePago(request.headers.get("PAYMENT-SIGNATURE"), env, { precio });
+export function leerFirmaDePago(request, env, { precio = null, url = null } = {}) {
+  // W56 — la url del recurso sale de la peticion misma: es la que se esta
+  // cobrando y la que llevo el reto. Si no la hay, `recursoDePago` cae en la de
+  // HTTP, que es la que anuncia el .well-known.
+  return validarSobreDePago(request.headers.get("PAYMENT-SIGNATURE"), env,
+    { precio, url: url || (request && request.url) || null });
 }
 
 // ---------------------------------------------------------------------------
