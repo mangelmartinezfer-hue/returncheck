@@ -591,6 +591,11 @@ async function closeOut(env, resp, req, { capture = null, policyText: textoPolit
   const checkId = await recordAnswer(env, {
     resp: final, req, apiKey: req.__api_key, build: BUILD,
     corpusId: final.meta && final.meta.corpus_id,
+    // PR-1 — el identificador de la PETICION viaja con ella (mismo mecanismo que
+    // `__api_key`) para que la fila se pueda cruzar con los registros de la
+    // invocacion. Es null en los caminos que no lo pasan todavia; la columna es
+    // nullable justo por eso.
+    requestId: req.__request_id || null,
   });
   if (checkId) final.meta = { ...final.meta, check_id: checkId };
 
