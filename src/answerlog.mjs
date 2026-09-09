@@ -83,7 +83,7 @@ function dominioDe(v) {
  * Nunca lanza. Devuelve el id, que se expone al cliente como `check_id` para que
  * pueda citarlo en una reclamación.
  */
-export async function recordAnswer(env, { resp, req, apiKey, build, corpusId } = {}) {
+export async function recordAnswer(env, { resp, req, apiKey, build, corpusId, requestId = null } = {}) {
   try {
     if (!env || !env.DB || !resp) return null;
     if (String(env.ANSWER_LOG ?? "true") === "false") return null;
@@ -108,6 +108,7 @@ export async function recordAnswer(env, { resp, req, apiKey, build, corpusId } =
     await env.DB.prepare(
       `INSERT INTO answer_log (
          id, answered_at, build, model, client_ref, via, cache_hit,
+         request_id,
          corpus_id, merchant_domain, product_url,
          buyer_country, buyer_state, item_condition, return_reason,
          membership, purchase_channel, seller_name,
@@ -116,7 +117,7 @@ export async function recordAnswer(env, { resp, req, apiKey, build, corpusId } =
          window_basis, deadline_date, exact_clause,
          guard_name, guard_rejected_clause, reason,
          charged, price_usd, retention_until
-       ) VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?, ?,?,?)`
+       ) VALUES (?,?,?,?,?,?,?, ?, ?,?,?, ?,?,?,?, ?,?,?, ?,?,?, ?,?,?,?,?, ?,?,?, ?,?,?, ?,?,?)`
     ).bind(
       id, ahora, build || null, (env.AI_MODEL || "default-8b-fast"),
       apiKey ? await sha256full(apiKey) : null,
@@ -126,6 +127,12 @@ export async function recordAnswer(env, { resp, req, apiKey, build, corpusId } =
       // puede reproducir igual.
       (resp.meta && resp.meta.checked_via) || null,
       resp.meta && resp.meta.cache_hit ? 1 : 0,
+
+      // PR-1 — el identificador de la peticion que produjo esta respuesta. Es lo
+      // que permite ir de una reclamacion ("me disteis el rc_req_...") a la fila,
+      // y de la fila a los registros de la invocacion. NULL cuando el camino no
+      // lo pasa todavia: la columna es aditiva y nullable a proposito.
+      requestId || null,
 
       corpusId || (resp.meta && resp.meta.corpus_id) || null,
       dominio || null,
