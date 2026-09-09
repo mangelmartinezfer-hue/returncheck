@@ -126,14 +126,18 @@ test("W48 LO MAS IMPORTANTE: con el interruptor APAGADO no cambia nada", async (
   // Aunque la direccion de cobro este configurada y aunque llegue una firma.
   const apagado = { ...ENV_X402, X402_ENABLED: "false" };
   const res = await llamarHerramienta(apagado, { payment_signature: "cualquier-cosa" });
-  assert.equal(res.structuredContent, undefined, "no se anuncia ningun precio");
+  // PR-1 — igual que arriba: el error ya lleva bloque estructurado, asi que lo
+  // que se afirma es lo que importaba, que NO se anuncia precio.
+  assert.equal(res.structuredContent.accepts, undefined, "no se anuncia ningun precio");
+  assert.equal(res.structuredContent.x402Version, undefined, "ni version de x402");
   assert.match(res.content[0].text, /Free trial limit reached/, "el mensaje de siempre, intacto");
   assert.equal(res.isError, true);
 });
 
 test("W48: sin direccion de cobro NO se anuncia precio — se cae al correo", async () => {
   const res = await llamarHerramienta({ ...ENV_X402, X402_PAY_TO: "" });
-  assert.equal(res.structuredContent, undefined);
+  assert.equal(res.structuredContent.accepts, undefined, "sin direccion de cobro no hay precio que anunciar");
+  assert.equal(res.structuredContent.x402Version, undefined);
   assert.match(res.content[0].text, /Free trial limit reached/);
 });
 

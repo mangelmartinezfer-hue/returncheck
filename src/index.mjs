@@ -14,7 +14,7 @@ import { handleStripeWebhook } from "./stripe.mjs";
 import { handleMcp } from "./mcp.mjs";
 import { freeTrial } from "./freetier.mjs";
 import { readMetrics } from "./metrics.mjs";
-import { json, errorResponse, todayDate, BUILD } from "./util.mjs";
+import { json, errorResponse, todayDate, BUILD, newRequestId, conRequestId } from "./util.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
@@ -913,7 +913,7 @@ async function handleCheckX402(request, env) {
   });
 }
 
-async function handleCheck(request, env) {
+async function handleCheck(request, env, requestId = null) {
   const price = Number(env.PRICE_USD || "0.02");
   const chargeOnUnknown = String(env.CHARGE_ON_UNKNOWN || "false") === "true";
 
@@ -940,7 +940,7 @@ async function handleCheck(request, env) {
     const v = validateRequest(body);
     if (!v.ok) return errorResponse(v.code, v.message, 400);
     let resp;
-    try { resp = await runCheck(env, v.value); }
+    try { resp = await runCheck(env, { ...v.value, __request_id: requestId }); }
     catch (e) {
       if (e instanceof EngineError) return errorResponse(e.code, e.message, e.http);
       return errorResponse("INTERNAL", "Unexpected error.", 500);
@@ -967,7 +967,7 @@ async function handleCheck(request, env) {
   // 4) Motor (errores de proceso -> NO se cobra)
   let resp;
   try {
-    resp = await runCheck(env, { ...v.value, __api_key: apiKey });
+    resp = await runCheck(env, { ...v.value, __api_key: apiKey, __request_id: requestId });
   } catch (e) {
     if (e instanceof EngineError) return errorResponse(e.code, e.message, e.http);
     return errorResponse("INTERNAL", "Unexpected error.", 500);
@@ -1075,9 +1075,24 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const p = url.pathname;
-    try {
+    // PR-1 — SE GENERA AQUÍ, ANTES DEL `try` Y ANTES DE CUALQUIER RAMA.
+    //
+    // El sitio importa. Si se generase dentro del `try`, el `catch` de abajo
+    // —que es el que sirve el 500— no tendría ninguno que dar, y el 500 es
+    // exactamente la respuesta en la que el cliente más necesita algo que
+    // citarnos. Fuera del `try` no hay forma de que falte.
+    const requestId = newRequestId();
+    // Un solo punto de salida para TODAS las rutas: ver `conRequestId` en
+    // util.mjs para por qué esto es un envoltorio y no un parámetro repetido
+    // cuarenta veces.
+    const sellar = (resp) => conRequestId(resp, requestId);
+    // El despacho entero, tal cual estaba. Se saca del `try` para que el sellado
+    // pase por el MISMO sitio en los dos desenlaces —respuesta normal y 500—, y
+    // para que no haya que acordarse de sellar en cada `return` de los cuarenta
+    // que hay aquí dentro.
+    const despachar = async () => {
       if (request.method === "POST" && p === "/v1/signup") return await handleSignup(request, env);
-      if (request.method === "POST" && (p === "/v1/check" || p === "/v1/check_return")) return await handleCheck(request, env);
+      if (request.method === "POST" && (p === "/v1/check" || p === "/v1/check_return")) return await handleCheck(request, env, requestId);
       if (request.method === "GET" && p === "/v1/balance") return await handleBalance(request, env);
       if (request.method === "POST" && p === "/v1/agent/check")
         // W50 — esta nota tambien mentia ("wired but not yet enabled"). Esta ruta
@@ -1085,7 +1100,7 @@ export default {
         return educated402(env, "This endpoint is not the x402 path. x402 is live on POST /v1/check (PAYMENT-SIGNATURE header) and on the check_return MCP tool (payment_signature argument).");
       if (request.method === "POST" && p === "/webhooks/stripe") return await handleStripeWebhook(request, env);
       // Servidor MCP (Streamable HTTP): descubrimiento y llamada de check_return por agentes.
-      if (p === "/mcp") return await handleMcp(request, env);
+      if (p === "/mcp") return await handleMcp(request, env, requestId);
       // Manifiestos de descubrimiento para agentes/crawlers.
       if (request.method === "GET" && p === "/llms.txt") return llmsTxt(env);
       if (request.method === "GET" && p === "/data-policy") return dataPolicy(env);
@@ -1279,8 +1294,17 @@ export default {
         }
       }
       return errorResponse("INVALID_INPUT", "Not found.", 404);
+    };
+
+    try {
+      return await sellar(await despachar());
     } catch (e) {
-      return errorResponse("INTERNAL", "Unexpected error.", 500);
+      // PR-1 — EL 500 ES EL QUE MÁS FALTA HACÍA. Es la respuesta que no lleva
+      // `check_id` (el motor no llegó a contestar), no lleva cuerpo útil y no
+      // deja al cliente nada que citar. Ahora lleva `request_id` en la cabecera
+      // y dentro de `error`, y con eso se encuentra la invocación en los
+      // registros. Por eso `requestId` se genera fuera de este `try`.
+      return await sellar(errorResponse("INTERNAL", "Unexpected error.", 500));
     }
   },
 };
