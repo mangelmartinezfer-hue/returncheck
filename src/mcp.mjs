@@ -12,6 +12,7 @@ import { x402Activo, validarSobreDePago, validarPagoDecodificado, sacarDelSobre,
          cabeceraLiquidacion } from "./x402.mjs";
 import { retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.mjs";
 import { canonico } from "./idempotencia.mjs";
+import { REQUEST_ID_HEADER } from "./util.mjs";
 
 const DEFAULT_PROTOCOL = "2025-06-18";
 
@@ -83,10 +84,55 @@ function bearer(request) {
 }
 
 function rpcResult(id, result) { return { jsonrpc: "2.0", id, result }; }
-function rpcError(id, code, message) { return { jsonrpc: "2.0", id, error: { code, message } }; }
+function rpcError(id, code, message, requestId = null) {
+  const error = { code, message };
+  // PR-1 — `data` es el hueco que JSON-RPC reserva para informacion adicional
+  // del error, y es donde un cliente de MCP espera encontrarla. La cabecera HTTP
+  // tambien lo lleva, pero un cliente que solo mire el sobre JSON-RPC no ve
+  // cabeceras: sin esto, un error de protocolo seguiria sin nada que citar.
+  if (requestId) error.data = { request_id: requestId };
+  return { jsonrpc: "2.0", id, error };
+}
+
+/**
+ * PR-1 — EL IDENTIFICADOR EN EL RESULTADO DE LA HERRAMIENTA.
+ *
+ * POR QUE UN SELLADOR Y NO UN PARAMETRO EN LAS QUINCE LLAMADAS A `toolText`.
+ * Mismo criterio que `conRequestId` en util.mjs: hay quince sitios que producen
+ * un resultado de error aqui dentro, y lo que hay que acordarse de poner en
+ * quince sitios acaba faltando en uno. Se sella una vez, en `handleRpc`, por
+ * donde pasan todos.
+ *
+ * SOLO SE TOCAN LOS ERRORES. En una respuesta buena `structuredContent` ES el
+ * objeto del contrato v1.0, y ahi no se mete nada: el identificador viaja en la
+ * cabecera. Un error, en cambio, hasta hoy era TEXTO PELADO —`toolText` no
+ * devolvia ningun campo estructurado— y un agente no puede leer un parrafo.
+ *
+ * OJO CON `error`, QUE AQUI TAMBIEN SIGNIFICA DOS COSAS: en el reto de pago
+ * (`retoMcp` -> `structuredContent` = el cuerpo del reto) `error` es una CADENA
+ * de la especificacion x402, no un objeto. Meterle un campo dentro corromperia
+ * el reto, asi que en ese caso el identificador va en la raiz.
+ */
+function sellarResultado(result, requestId) {
+  if (!result || !requestId || !result.isError) return result;
+
+  const sc = (result.structuredContent && typeof result.structuredContent === "object"
+              && !Array.isArray(result.structuredContent)) ? result.structuredContent : null;
+
+  if (sc) {
+    if (sc.error && typeof sc.error === "object" && !Array.isArray(sc.error)) sc.error.request_id = requestId;
+    else sc.request_id = requestId;                       // reto x402: `error` es cadena
+    return result;
+  }
+
+  // `toolText`: hasta ahora, texto y nada mas. Se le da forma para que el agente
+  // pueda leer el identificador sin analizar una frase en ingles.
+  const texto = (result.content && result.content[0] && result.content[0].text) || null;
+  return { ...result, structuredContent: { error: { message: texto, request_id: requestId } } };
+}
 
 // Ejecuta la herramienta check_return (tramo gratis sin clave, o con auth + cobro).
-async function callCheckReturn(args, env, apiKey, request, meta) {
+async function callCheckReturn(args, env, apiKey, request, meta, requestId = null) {
   const price = Number(env.PRICE_USD || "0.02");
   const chargeOnUnknown = String(env.CHARGE_ON_UNKNOWN || "false") === "true";
   const signup = `${env.PUBLIC_BASE_URL || ""}/v1/signup`;
@@ -114,7 +160,7 @@ async function callCheckReturn(args, env, apiKey, request, meta) {
       const v = validateRequest(args);
       if (!v.ok) return toolText("Invalid input: " + v.message, true);
       try {
-        const resp = await runCheck(env, v.value);
+        const resp = await runCheck(env, { ...v.value, __request_id: requestId });
         return { content: [{ type: "text", text: JSON.stringify(resp) }], structuredContent: resp, isError: false };
       } catch (e) {
         if (e instanceof EngineError) return toolText("Engine error (" + e.code + "): " + e.message, true);
@@ -145,7 +191,7 @@ async function callCheckReturn(args, env, apiKey, request, meta) {
 
   let resp;
   try {
-    resp = await runCheck(env, v.value);
+    resp = await runCheck(env, { ...v.value, __request_id: requestId });
   } catch (e) {
     if (e instanceof EngineError) return toolText("Engine error (" + e.code + "): " + e.message + " — not charged.", true);
     return toolText("Unexpected engine error — not charged.", true);
@@ -473,7 +519,7 @@ async function pagarConX402(args, env, request, vehiculos) {
 
 // Procesa un mensaje JSON-RPC individual. Devuelve el objeto respuesta, o null
 // si era una notificación (sin id -> no se responde).
-async function handleRpc(msg, env, apiKey, request) {
+async function handleRpc(msg, env, apiKey, request, requestId = null) {
   const { id, method, params } = msg || {};
   const isNotification = id === undefined || id === null;
 
@@ -491,14 +537,14 @@ async function handleRpc(msg, env, apiKey, request) {
       return rpcResult(id, { tools: [TOOL] });
     case "tools/call": {
       const name = params && params.name;
-      if (name !== "check_return") return rpcError(id, -32602, "Unknown tool: " + name);
+      if (name !== "check_return") return rpcError(id, -32602, "Unknown tool: " + name, requestId);
       const result = await callCheckReturn((params && params.arguments) || {}, env, apiKey, request,
-                                           (params && params._meta) || null);
-      return rpcResult(id, result);
+                                           (params && params._meta) || null, requestId);
+      return rpcResult(id, sellarResultado(result, requestId));
     }
     default:
       if (isNotification) return null;             // notificaciones que no manejamos
-      return rpcError(id, -32601, "Method not found: " + method);
+      return rpcError(id, -32601, "Method not found: " + method, requestId);
   }
 }
 
@@ -509,7 +555,7 @@ const CORS = {
 };
 
 // Punto de entrada del transporte Streamable HTTP.
-export async function handleMcp(request, env) {
+export async function handleMcp(request, env, requestId = null) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   // GET (stream servidor->cliente) opcional: no lo soportamos -> 405 permitido por la spec.
   if (request.method === "GET") return new Response("Method Not Allowed", { status: 405, headers: CORS });
@@ -518,7 +564,7 @@ export async function handleMcp(request, env) {
 
   let body;
   try { body = await request.json(); }
-  catch { return jsonRpcHttp(rpcError(null, -32700, "Parse error"), 400); }
+  catch { return jsonRpcHttp(rpcError(null, -32700, "Parse error", requestId), 400, requestId); }
 
   const apiKey = bearer(request);
 
@@ -526,21 +572,22 @@ export async function handleMcp(request, env) {
   if (Array.isArray(body)) {
     const out = [];
     for (const m of body) {
-      const r = await handleRpc(m, env, apiKey, request);
+      const r = await handleRpc(m, env, apiKey, request, requestId);
       if (r) out.push(r);
     }
     if (out.length === 0) return new Response(null, { status: 202, headers: CORS });
-    return jsonRpcHttp(out, 200);
+    return jsonRpcHttp(out, 200, requestId);
   }
 
-  const r = await handleRpc(body, env, apiKey, request);
+  const r = await handleRpc(body, env, apiKey, request, requestId);
   if (!r) return new Response(null, { status: 202, headers: CORS }); // era notificación
-  return jsonRpcHttp(r, 200);
+  return jsonRpcHttp(r, 200, requestId);
 }
 
-function jsonRpcHttp(payload, status) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { "content-type": "application/json", ...CORS },
-  });
+function jsonRpcHttp(payload, status, requestId = null) {
+  const headers = { "content-type": "application/json", ...CORS };
+  // PR-1 — la misma cabecera que sirve /v1/check. Un cliente que hable los dos
+  // transportes no tiene que aprender dos nombres para lo mismo.
+  if (requestId) headers[REQUEST_ID_HEADER] = requestId;
+  return new Response(JSON.stringify(payload), { status, headers });
 }

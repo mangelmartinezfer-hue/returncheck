@@ -227,7 +227,10 @@ test("W51 LO QUE PROTEGE EL DINERO: dos pagos DISTINTOS se rechazan por ambiguos
   }));
   assert.equal(res.isError, true);
   assert.match(res.content[0].text, /do not describe the same payment/);
-  assert.equal(res.structuredContent, undefined, "no se sirve veredicto");
+  // PR-1 — el error lleva bloque estructurado; lo que no lleva, que es lo que
+  // esta prueba protege, es veredicto ni apariencia de cobro.
+  assert.equal(res.structuredContent.verdict, undefined, "no se sirve veredicto");
+  assert.equal(res.structuredContent.x402, undefined, "ni apariencia de liquidacion");
   assert.equal(res._meta, undefined, "y ninguna apariencia de liquidacion");
 });
 

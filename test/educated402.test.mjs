@@ -160,7 +160,12 @@ test("W50: MCP no cambia de logica — saldo cero sigue dando texto plano sin re
   const res = (await r.json()).result;
   assert.equal(res.isError, true);
   assert.match(res.content[0].text, /Insufficient balance/);
-  assert.equal(res.structuredContent, undefined, "por MCP el saldo cero nunca fue un reto, y sigue sin serlo");
+  // PR-1 — antes esto se comprobaba con `structuredContent === undefined`. Ahora
+  // un error de MCP SI lleva bloque estructurado (con su request_id), asi que la
+  // invariante se dice entera: lo que nunca hubo aqui es un RETO DE PAGO.
+  assert.equal(res.structuredContent.accepts, undefined, "por MCP el saldo cero nunca fue un reto, y sigue sin serlo");
+  assert.equal(res.structuredContent.x402Version, undefined, "ni el menor rastro de reto");
+  assert.equal(res.structuredContent.verdict, undefined, "y desde luego ningun veredicto");
 });
 
 test("W50: MCP sin clave y con tramo agotado sigue dando el reto en structuredContent", async () => {

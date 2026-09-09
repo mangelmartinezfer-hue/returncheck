@@ -29,6 +29,97 @@ export function errorResponse(code, message, httpStatus, details) {
   return json(body, { status: httpStatus });
 }
 
+// ---------------------------------------------------------------------------
+// PR-1 — EL IDENTIFICADOR DE PETICIÓN.
+//
+// PARA QUÉ SIRVE, que no es lo mismo que `check_id`. `check_id` identifica una
+// RESPUESTA del motor y solo existe si el motor llegó a contestar
+// (engine.mjs:595). Cuando algo se cae —un 402, un 409, un 500— no hay
+// `check_id` que citar, y hasta hoy el cliente se quedaba sin NADA con lo que
+// volver a nosotros. `request_id` existe SIEMPRE, desde la primera línea del
+// router, y por eso es el que se puede pedir en una reclamación.
+//
+// EL PREFIJO NO ES DECORACIÓN: `rc_req_` es lo que hace que un identificador
+// pegado por un tercero en un correo se pueda encontrar con un `grep` sobre los
+// registros sin sacar además todos los UUID del mundo.
+// ---------------------------------------------------------------------------
+
+const REQUEST_ID_PREFIJO = "rc_req_";
+
+export function newRequestId() {
+  const u = (globalThis.crypto && globalThis.crypto.randomUUID)
+    ? globalThis.crypto.randomUUID()
+    // Mismo respaldo que `uuid()` en answerlog.mjs: sin `crypto` no nos quedamos
+    // sin identificador, que es justo lo que este módulo existe para evitar.
+    : Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e9).toString(36);
+  return REQUEST_ID_PREFIJO + u;
+}
+
+export const REQUEST_ID_HEADER = "X-ReturnCheck-Request-Id";
+
+/**
+ * SELLA UNA RESPUESTA CON SU `request_id`, Y SE APLICA EN UN SOLO SITIO.
+ *
+ * POR QUÉ UN ENVOLTORIO Y NO UN PARÁMETRO EN CADA `errorResponse`. La otra
+ * opción era pasar el identificador a las ~40 llamadas de `errorResponse` y
+ * `json` que hay repartidas por el router. Se ha descartado por la misma razón
+ * que cobro-x402.mjs existe: lo que hay que acordarse de poner en cuarenta
+ * sitios acaba faltando en uno, y el que falte será precisamente el camino raro
+ * por el que alguien llame para reclamar. Aquí pasa TODA respuesta del Worker,
+ * incluidas las rutas que se añadan mañana sin leer este comentario.
+ *
+ * LA CABECERA VA SIEMPRE. El cuerpo se toca SOLO en respuestas de error y solo
+ * si es JSON: una respuesta buena no se vuelve a serializar, así que el camino
+ * caliente no paga nada por esto.
+ *
+ * OJO CON `error`, QUE SIGNIFICA DOS COSAS DISTINTAS EN ESTE SERVICIO:
+ *
+ *   · `{ error: { code, message } }`      el contrato de error (util.mjs)
+ *   · `{ x402Version, error: "texto", …}` el reto de pago (x402.mjs:149-158)
+ *
+ * En el primero el identificador va DENTRO de `error`, que es donde el cliente
+ * lo va a buscar. En el segundo `error` es una cadena y meterle un campo dentro
+ * sería corromper el reto, así que va en la raíz. Nunca se toca `accepts` ni
+ * `resource`: el contrato con el agente y con el facilitador se queda como está.
+ *
+ * Y NO SE TOCA EL SOBRE `PAYMENT-REQUIRED`, que se construye aparte en
+ * index.mjs:853 sobre `r.reto` y no pasa por aquí. Esa era la regla de W32 —en
+ * el sobre no se mete nada que el facilitador no espere— y sigue en pie.
+ *
+ * Nunca lanza: si el cuerpo no se puede releer o no era JSON, se devuelve la
+ * respuesta con la cabecera puesta. Perder el campo del cuerpo es malo; tumbar
+ * una respuesta buena por intentar añadirlo sería peor.
+ */
+export async function conRequestId(resp, requestId) {
+  try {
+    if (!resp || !requestId) return resp;
+
+    const cabeceras = new Headers(resp.headers);
+    cabeceras.set(REQUEST_ID_HEADER, requestId);
+
+    const esJson = /application\/json/i.test(resp.headers.get("content-type") || "");
+    if (resp.status < 400 || !esJson)
+      return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: cabeceras });
+
+    const texto = await resp.text();
+    let cuerpo;
+    try { cuerpo = JSON.parse(texto); } catch (_) { cuerpo = null; }
+    if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo))
+      return new Response(texto, { status: resp.status, statusText: resp.statusText, headers: cabeceras });
+
+    if (cuerpo.error && typeof cuerpo.error === "object" && !Array.isArray(cuerpo.error))
+      cuerpo.error.request_id = requestId;
+    else
+      cuerpo.request_id = requestId;
+
+    return new Response(JSON.stringify(cuerpo), {
+      status: resp.status, statusText: resp.statusText, headers: cabeceras,
+    });
+  } catch (_) {
+    return resp;                                  // nunca rompe una respuesta
+  }
+}
+
 // Clave de API pública para un cliente nuevo.
 export function newApiKey() {
   const bytes = crypto.getRandomValues(new Uint8Array(24));
