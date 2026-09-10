@@ -15,6 +15,7 @@ import { handleMcp } from "./mcp.mjs";
 import { freeTrial } from "./freetier.mjs";
 import { readMetrics } from "./metrics.mjs";
 import { json, errorResponse, todayDate, BUILD, newRequestId, conRequestId } from "./util.mjs";
+import { deploymentInfo } from "./build-info.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
@@ -418,6 +419,12 @@ function discoveryDocument(env) {
   return {
     name: "ReturnCheck",
     build: BUILD,
+    // PR-1c — QUÉ CÓDIGO EXACTO ACABA DE RESPONDER. `build` se queda donde
+    // estaba (hay agentes leyéndolo) pero ya no es una cadena escrita a mano:
+    // sale de aquí dentro. Los cinco campos son la forma congelada del bloque —
+    // si algún día entra `bundle_sha256` se añade, pero estos cinco no cambian
+    // ni desaparecen, porque un manifiesto que cambia de forma no se puede citar.
+    deployment: deploymentInfo(env),
     model: env.AI_MODEL || "default-8b-fast",
     temperature: inferenceParams(env).temperature,
     candidate_clauses: String(env.USE_CANDIDATES ?? "true") !== "false",

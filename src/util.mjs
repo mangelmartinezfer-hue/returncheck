@@ -5,7 +5,14 @@
 // sin ella no puede decir QUÉ build dio una respuesta concreta. Es el dato que
 // convierte "respondimos mal" en "respondimos mal con este código, y lo
 // arreglamos en este otro".
-export const BUILD = "2026-09-03-w56-resource-en-el-sobre";
+//
+// PR-1c — Y AHORA YA NO SE ESCRIBE A MANO. Aquí había una cadena literal, y una
+// cadena literal solo dice la verdad si alguien se acuerda de cambiarla: el
+// commit de W57 (9a6d4e7) no la cambió, y durante seis días este servicio
+// anunció un build que no era el suyo. Se deriva del commit y de su fecha
+// (`src/build-info.mjs`), y quien no genere el sello obtiene "unknown", que es
+// la verdad. Se reexporta desde aquí para no mover a sus cuatro consumidores.
+export { BUILD } from "./build-info.mjs";
 
 export function nowISO() {
   return new Date().toISOString();
