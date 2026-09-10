@@ -144,3 +144,30 @@ head_sampling_rate = 1
 enabled = true
 head_sampling_rate = 1
 invocation_logs = true
+
+# --- PR-1c: IDENTIDAD DE DESPLIEGUE -----------------------------------------
+#
+# El binding de metadatos de version. Lo unico de los cinco campos que Cloudflare
+# sabe y nosotros no: QUE version concreta esta atendiendo la peticion. Se lee en
+# tiempo de ejecucion, sin paso de construccion, asi que no puede haber
+# circularidad (a diferencia de un hash del propio artefacto, que va a PR-3).
+#
+# Expone `id`, `tag` y `timestamp`. El ejemplo de la documentacion de Cloudflare
+# los renombra a `versionId`/`versionTag` al desestructurar; el codigo lee `.id`,
+# y hay una prueba que lo fija para que nadie escriba `.versionId` y se coma un
+# `undefined` en silencio.
+#
+# ESTO NO SURTE EFECTO HASTA EL PRIMER DESPLIEGUE POSTERIOR A ESTE PR. Hasta
+# entonces `version_id` sale `null` en produccion. Es lo correcto, no un fallo.
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+# La construccion del sello de identidad, ANTES de empaquetar.
+#
+# VA AQUI Y NO SOLO EN package.json a proposito: la documentacion de wrangler dice
+# que este comando "will be run as part of `wrangler dev` and `npx wrangler
+# deploy`". Es decir, corre aunque alguien invoque wrangler directamente saltandose
+# npm. Eso es lo que garantiza que NUNCA se empaquete sin el sello, que es la
+# unica forma de que el servicio pueda mentir sobre su propia version.
+[build]
+command = "node tools/build-info.mjs"

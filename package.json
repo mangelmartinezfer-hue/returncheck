@@ -5,8 +5,12 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "postinstall": "node tools/build-info.mjs",
+    "build-info": "node tools/build-info.mjs",
+    "pretest": "node tools/build-info.mjs",
     "test": "node --test test/*.test.mjs",
     "dev": "wrangler dev",
+    "predeploy": "node tools/build-info.mjs",
     "deploy": "wrangler deploy"
   },
   "dependencies": {

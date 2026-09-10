@@ -24,3 +24,14 @@ comprador.txt
 corpus.json
 corpus*.json
 *-corpus.json
+
+# PR-1c — identidad de despliegue. `tools/build-info.mjs` escribe aqui el commit,
+# la limpieza del arbol y la marca de construccion, en cada `npm test`,
+# `wrangler dev` y `wrangler deploy`.
+#
+# VA IGNORADO Y ESA ES LA PIEZA CLAVE, no una comodidad: si este fichero se
+# versionara, generarlo dejaria el arbol sucio y `tree_clean` se desmentiria a si
+# mismo en el mismo acto de medirlo. Hay una prueba que compara el `git status
+# --porcelain` de antes y el de despues de generar; si alguien borra esta linea,
+# esa prueba se pone roja.
+src/build-info.generated.mjs
