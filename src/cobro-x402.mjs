@@ -111,7 +111,7 @@ export function retoConPuertaHumana(env, { url, motivo, precio = null } = {}) {
  * /mcp da huellas distintas y por tanto "conflicto", no "repetido". Es el lado
  * seguro — se niega a servir antes que arriesgarse a cobrar dos veces.
  */
-export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, precio }) {
+export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, precio, requestId = null }) {
   // 3) Idempotencia ANTES de verificar y antes de gastar el modelo. Un reintento
   //    no puede costar dinero ni computo.
   const idPago = leerIdentificador(pago);
@@ -135,7 +135,7 @@ export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, preci
 
   // 5) El motor. Del pagador solo se guarda su huella, igual que de una clave.
   let resp;
-  try { resp = await runCheck(env, { ...peticion, __api_key: ver.pagador || null }); }
+  try { resp = await runCheck(env, { ...peticion, __api_key: ver.pagador || null, __request_id: requestId || null }); }
   catch (e) {
     if (e instanceof EngineError) return { tipo: "error", code: e.code, message: e.message, http: e.http };
     return { tipo: "error", code: "INTERNAL", message: "Unexpected error.", http: 500 };

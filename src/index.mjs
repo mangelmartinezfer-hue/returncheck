@@ -863,7 +863,7 @@ function reto402(env, request, motivo) {
   });
 }
 
-async function handleCheckX402(request, env) {
+async function handleCheckX402(request, env, requestId = null) {
   const precio = String(env.PRICE_USD || "0.02");
 
   // 1) La firma, y con ella la comprobacion que NO se delega en el facilitador:
@@ -882,7 +882,7 @@ async function handleCheckX402(request, env) {
   //      ruta y el MCP. Aqui abajo solo queda pintar el resultado en HTTP.
   const r = await cobrarConX402(env, {
     pago: firma.pago, aceptado, peticion: v.value,
-    ruta: new URL(request.url).pathname, precio,
+    ruta: new URL(request.url).pathname, precio, requestId,
   });
 
   if (r.tipo === "conflicto")
@@ -928,7 +928,7 @@ async function handleCheck(request, env, requestId = null) {
   // de pago. Se mira antes que el tramo gratis a proposito: quien ofrece pagar no
   // debe gastar su cuota gratuita sin querer.
   if (x402Activo(env) && request.headers.get("PAYMENT-SIGNATURE"))
-    return await handleCheckX402(request, env);
+    return await handleCheckX402(request, env, requestId);
 
   // 1) Autenticación — o tramo de prueba SIN clave (para agentes autónomos).
   const apiKey = bearer(request);
