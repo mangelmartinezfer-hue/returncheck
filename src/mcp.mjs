@@ -150,7 +150,7 @@ async function callCheckReturn(args, env, apiKey, request, meta, requestId = nul
   const pagoArg = typeof args.payment_signature === "string" && args.payment_signature.trim()
     ? args.payment_signature : null;
   if (x402Activo(env) && (pagoMeta !== undefined || pagoArg))
-    return await pagarConX402(args, env, request, { pagoMeta, pagoArg });
+    return await pagarConX402(args, env, request, { pagoMeta, pagoArg }, requestId);
 
   // Sin clave: probamos el tramo GRATIS (topes por IP/día y global). Si no queda,
   // pedimos alta. Esto permite que un agente autónomo pruebe sin registrarse.
@@ -451,7 +451,7 @@ function resolverPago(env, { pagoMeta, pagoArg }, precio, url = null) {
 // W48 — EL COBRO. No hay logica de pago aqui: la que hay esta en cobro-x402.mjs
 // y es LA MISMA que ejecuta /v1/check. Esta funcion solo traduce entrada y salida.
 // ---------------------------------------------------------------------------
-async function pagarConX402(args, env, request, vehiculos) {
+async function pagarConX402(args, env, request, vehiculos, requestId = null) {
   const precio = String(env.PRICE_USD || "0.02");
 
   // 1) El pago, venga por _meta o por el argumento, por el MISMO verificador del
@@ -476,7 +476,7 @@ async function pagarConX402(args, env, request, vehiculos) {
   // 3) El cobro compartido.
   const r = await cobrarConX402(env, {
     pago: firma.pago, aceptado, peticion: v.value,
-    ruta: new URL(request.url).pathname, precio,
+    ruta: new URL(request.url).pathname, precio, requestId,
   });
 
   if (r.tipo === "conflicto")

@@ -18,6 +18,10 @@ import assert from "node:assert/strict";
 import worker from "../src/index.mjs";
 import { newRequestId, conRequestId, REQUEST_ID_HEADER, errorResponse, json } from "../src/util.mjs";
 import { recordAnswer } from "../src/answerlog.mjs";
+import { meterEnSobre } from "../src/x402.mjs";
+import { huella } from "../src/idempotencia.mjs";
+import { cacheKey } from "../src/text.mjs";
+import { sha256full } from "../src/corpus.mjs";
 
 const PAY_TO = "0xbF428071027402E9b0cE85e22146EDdc028cEB3b";
 const ASSET  = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
@@ -361,4 +365,329 @@ test("PR-1 envoltorio: conserva estado y cabeceras que ya hubiera", async () => 
   assert.equal(r.status, 409);
   assert.equal(r.headers.get("X-ReturnCheck-Cost"), "0.0000", "no pisa lo que ya venia");
   assert.equal((await r.json()).error.request_id, "rc_req_y");
+});
+
+// ---------------------------------------------------------------------------
+// 8. PR-1 (propagacion) — EL CAMINO PAGADO. Autorizado el 12 sep 2026.
+//
+// EL AGUJERO QUE CIERRAN ESTAS PRUEBAS. Hasta ahora `request_id` llegaba al
+// cliente por los cuatro desenlaces y por los dos transportes, pero en el camino
+// de PAGO no habia ni una sola fila que lo llevara: `handleCheckX402` no lo
+// recibia (index.mjs) y `pagarConX402` tampoco (mcp.mjs), asi que
+// `cobrarConX402` llamaba a `runCheck` sin `__request_id` y `answer_log.request_id`
+// salia NULL. Es decir: al UNICO cliente que paga se le daba un identificador que
+// despues no se podia buscar.
+//
+// LO QUE NO SE TOCA, y estas pruebas lo fijan: la huella de idempotencia y la
+// clave de cache. Si `__request_id` entrase en cualquiera de las dos, esto
+// dejaria de ser propagacion y pasaria a costar dinero — un fallo de cache por
+// peticion, o un reintento legitimo leido como conflicto.
+// ---------------------------------------------------------------------------
+
+const RED_PAGO = "eip155:8453";
+const TX_PAGO  = "0xdeadbeefcafe0000000000000000000000000000000000000000000000000057";
+const PAGADOR  = "0x857bEEF0000000000000000000000000000000aa";
+const NONCE_PAGO = "0x4748f83dd8b3f1ad933f056181b085e3d1b006556fc909feb23f9350f6f4d5c6";
+
+const POLIZA_PAGO = "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery. Items must be unopened and include all original accessories.";
+const PETICION_PAGO = {
+  product_url: "https://eval.example/p/RC25-01", buyer_country: "US",
+  item_condition: "unopened", reason: "changed_mind",
+  purchase_date: "2026-08-01", delivery_date: "2026-08-05", as_of: "2026-08-20",
+  page_text: POLIZA_PAGO,
+};
+
+const ENV_PAGO = {
+  ...ENV, ANSWER_LOG: "true", ANSWER_RETENTION_MONTHS: "12",
+  X402_ASSET_NAME: "USD Coin", X402_ASSET_VERSION: "2",
+  X402_FACILITATOR: "https://facilitador.example",
+};
+
+function iaPago(verdict = "YES") {
+  const det = verdict !== "UNKNOWN";
+  return { run: async () => ({ response: JSON.stringify({
+    verdict, confidence: 0.9,
+    answer_human: det ? "Yes. Within the 30-day window." : "Unknown.",
+    reason: det ? null : "The policy text does not resolve this case.",
+    merchant_resolved: { name: "eval.example", domain: "eval.example", is_marketplace_third_party: false },
+    policy: det ? { return_category: "MerchantReturnFiniteReturnWindow", merchant_return_days: 30,
+                    window_basis: "delivery_date", return_method: [], return_fees: null, refund_type: null } : null,
+    evidence: det ? { source_url: PETICION_PAGO.product_url, clause_id: null,
+                      exact_clause: "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery." } : null,
+  }) }) };
+}
+
+// D1 de mentira que apunta lo que de verdad interesa: las columnas con las que
+// se INSERTA en cada tabla. Guardar los NOMBRES y no solo los valores es lo que
+// permite afirmar que `request_id` sigue SIN aparecer donde no debe (prueba 8).
+function dbPago({ idemFila = null } = {}) {
+  const respuestas = [], liquidaciones = [], idem = [];
+  const columnas = (sql, marca) => {
+    const m = sql.replace(/\s+/g, " ").match(new RegExp(marca + " \\(([^)]*)\\) VALUES"));
+    return m ? m[1].split(",").map((x) => x.trim()).filter(Boolean) : null;
+  };
+  const g = { run: async () => ({ meta: { changes: 0 } }), first: async () => null,
+              all: async () => ({ results: [] }) };
+  return {
+    _resp: respuestas, _liq: liquidaciones, _idem: idem,
+    prepare: (sql) => ({
+      bind: (...a) => ({
+        ...g,
+        first: async () => (idemFila && /FROM payment_idempotency/.test(sql)) ? idemFila : null,
+        run: async () => {
+          let c;
+          if ((c = columnas(sql, "INSERT INTO answer_log"))) {
+            const fila = {}; c.forEach((n, i) => { fila[n] = a[i]; });
+            respuestas.push({ ...fila, __columnas: c });
+          }
+          if ((c = columnas(sql, "INSERT OR IGNORE INTO settlement_log"))) {
+            const fila = {}; c.forEach((n, i) => { fila[n] = a[i]; });
+            liquidaciones.push({ ...fila, __columnas: c });
+          }
+          if ((c = columnas(sql, "INSERT OR REPLACE INTO payment_idempotency"))) {
+            const fila = {}; c.forEach((n, i) => { fila[n] = a[i]; });
+            idem.push({ ...fila, __columnas: c });
+          }
+          return { meta: { changes: 1 } };
+        },
+      }),
+      ...g,
+    }),
+  };
+}
+
+const sobrePago = (extensions = undefined) => {
+  const payload = { signature: "0xsig", authorization: {
+    from: PAGADOR, to: PAY_TO, value: "20000",
+    validAfter: "0", validBefore: "1893456000", nonce: NONCE_PAGO } };
+  if (extensions) payload.extensions = extensions;
+  return {
+    x402Version: 2,
+    accepted: { scheme: "exact", network: RED_PAGO, amount: "20000", asset: ASSET,
+                payTo: PAY_TO, maxTimeoutSeconds: 60, extra: { name: "USD Coin", version: "2" } },
+    payload,
+  };
+};
+
+// El facilitador, de mentira. NO se llama a ninguno de verdad.
+function conFacilitadorPago({ settle = null } = {}, fn) {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (String(url).endsWith("/verify"))
+      return { ok: true, status: 200, json: async () => ({ isValid: true, payer: PAGADOR }) };
+    return { ok: true, status: 200,
+             json: async () => settle || { success: true, transaction: TX_PAGO, network: RED_PAGO, payer: PAGADOR } };
+  };
+  return fn().finally(() => { globalThis.fetch = original; });
+}
+
+const pagoPorHttp = (env, sobre = sobrePago(), peticion = PETICION_PAGO) =>
+  worker.fetch(new Request("https://rc.example/v1/check", {
+    method: "POST",
+    headers: { "content-type": "application/json", "PAYMENT-SIGNATURE": meterEnSobre(sobre) },
+    body: JSON.stringify(peticion),
+  }), env);
+
+const pagoPorMcp = (env, sobre = sobrePago(), peticion = PETICION_PAGO) =>
+  worker.fetch(new Request("https://rc.example/mcp", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+      params: { name: "check_return", arguments: peticion, _meta: { "x402/payment": sobre } } }),
+  }), env);
+
+// --- 1. HTTP x402, 200 -----------------------------------------------------
+
+test("PR-1 pagado HTTP: answer_log.request_id coincide con la cabecera", async () => {
+  const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const res = await conFacilitadorPago({}, () => pagoPorHttp(env));
+
+  assert.equal(res.status, 200);
+  const requestId = res.headers.get(REQUEST_ID_HEADER);
+  assert.match(requestId, RE_ID, "la respuesta pagada sigue llevando el identificador");
+
+  assert.equal(env.DB._resp.length, 1, "el motor escribio su fila");
+  assert.equal(env.DB._resp[0].request_id, requestId,
+    "LA PROPIEDAD: el identificador que se le da al cliente es el que queda en la fila");
+
+  // Y sigue conviviendo con el check_id, que es otro identificador y otra cosa.
+  const cuerpo = await res.json();
+  assert.ok(cuerpo.meta.check_id);
+  assert.equal(env.DB._resp[0].id, cuerpo.meta.check_id);
+  assert.notEqual(cuerpo.meta.check_id, requestId);
+});
+
+// --- 2. MCP x402, 200 ------------------------------------------------------
+
+test("PR-1 pagado MCP: answer_log.request_id coincide con la cabecera HTTP", async () => {
+  const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const res = await conFacilitadorPago({}, () => pagoPorMcp(env));
+
+  assert.equal(res.status, 200);
+  const requestId = res.headers.get(REQUEST_ID_HEADER);
+  assert.match(requestId, RE_ID);
+
+  assert.equal(env.DB._resp.length, 1);
+  assert.equal(env.DB._resp[0].request_id, requestId);
+
+  // LIMITE QUE HAY QUE DEJAR DICHO, y por eso se comprueba: en un exito de MCP el
+  // identificador viaja en la CABECERA HTTP del transporte, no dentro del
+  // resultado JSON-RPC. `sellarResultado` solo sella los errores (mcp.mjs:117), y
+  // en una respuesta buena `structuredContent` ES el objeto del contrato v1.0.
+  // Esto NO es identificacion autocontenida del resultado MCP.
+  const sc = (await res.json()).result.structuredContent;
+  assert.equal(sc.request_id, undefined,
+    "en exito MCP el identificador NO va dentro del resultado JSON-RPC");
+  assert.ok(sc.meta.check_id, "lo que si va dentro es el check_id, como siempre");
+});
+
+// --- 3. El 402 de liquidacion fallida, que SI deja fila ---------------------
+
+test("PR-1 pagado: el 402 por liquidacion fallida deja fila y conserva el identificador", async () => {
+  // Es el unico 402 que deja rastro: el motor YA corrio (engine.mjs:591 escribio
+  // la fila) y solo despues fallo la liquidacion (cobro-x402.mjs:151-156), que
+  // marca charged=0 y devuelve reto. Si la propagacion no llegara hasta aqui, la
+  // reclamacion mas probable de todas —"pague y me disteis un 402"— seguiria sin
+  // poder mirarse.
+  const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const res = await conFacilitadorPago(
+    { settle: { success: false, errorReason: "insufficient_funds" } },
+    () => pagoPorHttp(env));
+
+  assert.equal(res.status, 402);
+  const requestId = res.headers.get(REQUEST_ID_HEADER);
+  assert.match(requestId, RE_ID);
+
+  assert.equal(env.DB._resp.length, 1, "la fila existe porque el motor llego a contestar");
+  assert.equal(env.DB._resp[0].request_id, requestId);
+  assert.equal(env.DB._liq.length, 0, "la liquidacion fallida no se registra");
+
+  // Y el reto no se ha corrompido: `error` sigue siendo la cadena de la spec.
+  const cuerpo = await res.json();
+  assert.equal(typeof cuerpo.error, "string");
+  assert.equal(cuerpo.request_id, requestId, "va en la raiz, no dentro de `error`");
+});
+
+// --- 4. Los dos campos llegan juntos a runCheck -----------------------------
+
+test("PR-1 pagado: cobrarConX402 entrega __api_key Y __request_id a la vez", async () => {
+  // No se puede espiar `runCheck` (import estatico), asi que se comprueba por sus
+  // DOS huellas observables en la misma fila: `client_ref` solo puede existir si
+  // llego `__api_key` (answerlog.mjs:123 lo deriva del pagador) y `request_id`
+  // solo si llego `__request_id`. Las dos a la vez, en la misma fila, es la
+  // prueba de que el objeto de cobro-x402.mjs:139 lleva los dos.
+  const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const res = await conFacilitadorPago({}, () => pagoPorHttp(env));
+  const requestId = res.headers.get(REQUEST_ID_HEADER);
+
+  const fila = env.DB._resp[0];
+  assert.equal(fila.request_id, requestId);
+  assert.equal(fila.client_ref, await sha256full(PAGADOR),
+    "client_ref es el sha-256 del pagador: prueba que __api_key siguio llegando");
+  assert.notEqual(fila.client_ref, null);
+});
+
+// --- 5. y 6. LA BARRERA MONETARIA ------------------------------------------
+
+test("PR-1 BARRERA: la huella de idempotencia NO cambia por el request_id", async () => {
+  // Si cambiara, un reintento legitimo se leeria como conflicto (409) o —peor—
+  // dejaria de reconocerse y se cobraria dos veces. La huella se calcula en
+  // cobro-x402.mjs:121 sobre `peticion`, ANTES de :139, y :139 construye un
+  // objeto NUEVO con la propagacion dentro. Esta prueba fija las dos cosas.
+  const aceptado = { scheme: "exact", network: RED_PAGO, amount: "20000",
+                     asset: ASSET, payTo: PAY_TO };
+  const peticion = { ...PETICION_PAGO };
+  const antes = await huella({ aceptado, metodo: "POST", ruta: "/v1/check", cuerpo: peticion });
+
+  // Exactamente lo que hace cobro-x402.mjs:139.
+  const enriquecido = { ...peticion, __api_key: PAGADOR, __request_id: "rc_req_loquesea" };
+
+  const despues = await huella({ aceptado, metodo: "POST", ruta: "/v1/check", cuerpo: peticion });
+  assert.equal(despues, antes, "la huella es la misma");
+  assert.equal("__request_id" in peticion, false, "y `peticion` no se ha mutado");
+  assert.equal(enriquecido.__request_id, "rc_req_loquesea");
+});
+
+test("PR-1 BARRERA: la clave de cache NO cambia por el request_id", async () => {
+  // Si entrara en la clave, cada peticion seria un fallo de cache y costaria una
+  // llamada al modelo. `cacheKey` enumera seis campos con nombre (text.mjs:7-16)
+  // y no recorre el objeto; esto lo deja fijado por prueba y no por lectura.
+  const base = { ...PETICION_PAGO };
+  assert.equal(
+    cacheKey({ ...base, __api_key: PAGADOR, __request_id: "rc_req_uno" }),
+    cacheKey({ ...base, __api_key: PAGADOR, __request_id: "rc_req_dos" }),
+    "dos peticiones que solo difieren en el identificador comparten entrada de cache");
+  assert.equal(cacheKey({ ...base, __request_id: "rc_req_uno" }), cacheKey(base));
+});
+
+// --- 7. Los desenlaces que NO dejan fila ------------------------------------
+
+test("PR-1 pagado: el 409 no escribe answer_log y aun asi devuelve el identificador", async () => {
+  // El conflicto se detecta en cobro-x402.mjs:123, ANTES de verificar (:134) y
+  // ANTES del motor (:139): no hay fila que escribir, y por eso el identificador
+  // de la cabecera es lo unico que el cliente puede citarnos.
+  const ID_PAGO = "pay_0123456789abcdef0123456789abcdef";
+  const env = {
+    ...ENV_PAGO, AI: iaPago("YES"),
+    DB: dbPago({ idemFila: {
+      payment_id: ID_PAGO, fingerprint: "una-huella-que-no-es-la-de-esta-peticion",
+      response_json: "{}", http_status: 200, transaction_hash: null,
+      expires_at: "2099-01-01T00:00:00.000Z",
+    } }),
+  };
+  const res = await conFacilitadorPago({},
+    () => pagoPorHttp(env, sobrePago({ "payment-identifier": ID_PAGO })));
+
+  assert.equal(res.status, 409);
+  const requestId = res.headers.get(REQUEST_ID_HEADER);
+  assert.match(requestId, RE_ID);
+  assert.equal((await res.json()).error.request_id, requestId);
+
+  assert.equal(env.DB._resp.length, 0, "el motor no llego a correr: no hay fila");
+  assert.equal(env.DB._liq.length, 0);
+  assert.equal(env.DB._idem.length, 0, "y tampoco se reescribe la idempotencia");
+});
+
+test("PR-1 pagado: un error del motor no escribe answer_log y devuelve el identificador", async () => {
+  // El 500 de cobro-x402.mjs:142 y el error de motor de :141 salen por el MISMO
+  // `return` de index.mjs:906 y por el mismo sellado, asi que la propiedad es la
+  // misma para los dos. Se ejercita el alcanzable: un 500 SIN capturar no se
+  // puede provocar de extremo a extremo porque todos los subsistemas del motor
+  // capturan (corpus.mjs:141, metrics.mjs:26 y :32, answerlog.mjs:170). El 500
+  // del catch del router ya lo cubre la prueba de mas arriba.
+  const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const res = await conFacilitadorPago({}, () =>
+    pagoPorHttp(env, sobrePago(), { ...PETICION_PAGO, page_text: "Too short." }));
+
+  assert.ok(res.status >= 400, "es un desenlace de error");
+  assert.notEqual(res.status, 200);
+  const requestId = res.headers.get(REQUEST_ID_HEADER);
+  assert.match(requestId, RE_ID, "el identificador sale igual");
+  assert.equal((await res.json()).error.request_id, requestId);
+  assert.equal(env.DB._resp.length, 0, "el motor no cerro respuesta: no hay fila que buscar");
+});
+
+// --- 8. El alcance no se ensancha -------------------------------------------
+
+test("PR-1 ALCANCE: settlement_log y payment_idempotency siguen SIN poblar request_id", async () => {
+  // schema-006-trazabilidad.sql:31-36 crea las tres columnas pero reserva estas
+  // dos a PR-2/PR-3. Esta prueba impide que la propagacion se ensanche en
+  // silencio hasta ellas: se mira la LISTA DE COLUMNAS del INSERT, que es donde
+  // se veria el ensanche aunque el valor viniera vacio.
+  const ID_PAGO = "pay_fedcba9876543210fedcba9876543210";
+  const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const res = await conFacilitadorPago({},
+    () => pagoPorHttp(env, sobrePago({ "payment-identifier": ID_PAGO })));
+  assert.equal(res.status, 200);
+
+  assert.equal(env.DB._liq.length, 1, "la liquidacion se registra, como en W57");
+  assert.equal(env.DB._liq[0].__columnas.includes("request_id"), false,
+    "settlement_log NO escribe request_id en este PR");
+
+  assert.equal(env.DB._idem.length, 1, "con payment-identifier si se guarda la idempotencia");
+  assert.equal(env.DB._idem[0].__columnas.includes("request_id"), false,
+    "payment_idempotency NO escribe request_id en este PR");
+
+  // Y la que SI se puebla sigue poblandose, para que la prueba no pase por vacia.
+  assert.equal(env.DB._resp[0].__columnas.includes("request_id"), true);
+  assert.equal(env.DB._resp[0].request_id, res.headers.get(REQUEST_ID_HEADER));
 });
