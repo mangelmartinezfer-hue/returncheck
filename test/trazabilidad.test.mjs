@@ -421,7 +421,7 @@ function iaPago(verdict = "YES") {
 // se INSERTA en cada tabla. Guardar los NOMBRES y no solo los valores es lo que
 // permite afirmar que `request_id` sigue SIN aparecer donde no debe (prueba 8).
 function dbPago({ idemFila = null } = {}) {
-  const respuestas = [], liquidaciones = [], idem = [];
+  const respuestas = [], idem = [];
   const columnas = (sql, marca) => {
     const m = sql.replace(/\s+/g, " ").match(new RegExp(marca + " \\(([^)]*)\\) VALUES"));
     return m ? m[1].split(",").map((x) => x.trim()).filter(Boolean) : null;
@@ -429,7 +429,7 @@ function dbPago({ idemFila = null } = {}) {
   const g = { run: async () => ({ meta: { changes: 0 } }), first: async () => null,
               all: async () => ({ results: [] }) };
   return {
-    _resp: respuestas, _liq: liquidaciones, _idem: idem,
+    _resp: respuestas, _idem: idem,
     prepare: (sql) => ({
       bind: (...a) => ({
         ...g,
@@ -439,10 +439,6 @@ function dbPago({ idemFila = null } = {}) {
           if ((c = columnas(sql, "INSERT INTO answer_log"))) {
             const fila = {}; c.forEach((n, i) => { fila[n] = a[i]; });
             respuestas.push({ ...fila, __columnas: c });
-          }
-          if ((c = columnas(sql, "INSERT OR IGNORE INTO settlement_log"))) {
-            const fila = {}; c.forEach((n, i) => { fila[n] = a[i]; });
-            liquidaciones.push({ ...fila, __columnas: c });
           }
           if ((c = columnas(sql, "INSERT OR REPLACE INTO payment_idempotency"))) {
             const fila = {}; c.forEach((n, i) => { fila[n] = a[i]; });
@@ -559,7 +555,6 @@ test("PR-1 pagado: el 402 por liquidacion fallida deja fila y conserva el identi
 
   assert.equal(env.DB._resp.length, 1, "la fila existe porque el motor llego a contestar");
   assert.equal(env.DB._resp[0].request_id, requestId);
-  assert.equal(env.DB._liq.length, 0, "la liquidacion fallida no se registra");
 
   // Y el reto no se ha corrompido: `error` sigue siendo la cadena de la spec.
   const cuerpo = await res.json();
@@ -643,7 +638,6 @@ test("PR-1 pagado: el 409 no escribe answer_log y aun asi devuelve el identifica
   assert.equal((await res.json()).error.request_id, requestId);
 
   assert.equal(env.DB._resp.length, 0, "el motor no llego a correr: no hay fila");
-  assert.equal(env.DB._liq.length, 0);
   assert.equal(env.DB._idem.length, 0, "y tampoco se reescribe la idempotencia");
 });
 
@@ -668,26 +662,34 @@ test("PR-1 pagado: un error del motor no escribe answer_log y devuelve el identi
 
 // --- 8. El alcance no se ensancha -------------------------------------------
 
-test("PR-1 ALCANCE: settlement_log y payment_idempotency siguen SIN poblar request_id", async () => {
-  // schema-006-trazabilidad.sql:31-36 crea las tres columnas pero reserva estas
-  // dos a PR-2/PR-3. Esta prueba impide que la propagacion se ensanche en
-  // silencio hasta ellas: se mira la LISTA DE COLUMNAS del INSERT, que es donde
-  // se veria el ensanche aunque el valor viniera vacio.
+test("PR-1 ALCANCE: payment_idempotency se escribe, pero SIN request_id", async () => {
+  // schema-006-trazabilidad.sql crea DOS columnas `request_id`: la de
+  // `answer_log`, que este PR puebla, y la de `payment_idempotency`, que se
+  // crea y se queda vacia. Esta prueba sujeta esa frontera por los dos lados, y
+  // mira la LISTA DE COLUMNAS del INSERT y no solo el valor: el ensanche se
+  // veria ahi aunque alguien enlazara un NULL.
+  //
+  // Las dos mitades importan. Sin la primera, "no se puebla" pasaria tambien si
+  // la fila no llegara a escribirse, y entonces la prueba no vigilaria nada.
   const ID_PAGO = "pay_fedcba9876543210fedcba9876543210";
   const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
   const res = await conFacilitadorPago({},
     () => pagoPorHttp(env, sobrePago({ "payment-identifier": ID_PAGO })));
   assert.equal(res.status, 200);
 
-  assert.equal(env.DB._liq.length, 1, "la liquidacion se registra, como en W57");
-  assert.equal(env.DB._liq[0].__columnas.includes("request_id"), false,
-    "settlement_log NO escribe request_id en este PR");
+  // 1. La fila de idempotencia SE ESCRIBE, y es la de esta peticion.
+  assert.equal(env.DB._idem.length, 1, "con payment-identifier se guarda la idempotencia");
+  assert.equal(env.DB._idem[0].payment_id, ID_PAGO);
+  assert.ok(env.DB._idem[0].fingerprint, "con su huella");
+  assert.equal(env.DB._idem[0].http_status, 200);
 
-  assert.equal(env.DB._idem.length, 1, "con payment-identifier si se guarda la idempotencia");
+  // 2. Y NO lleva request_id: ni la columna en el INSERT, ni valor.
   assert.equal(env.DB._idem[0].__columnas.includes("request_id"), false,
     "payment_idempotency NO escribe request_id en este PR");
+  assert.equal(env.DB._idem[0].request_id, undefined);
 
-  // Y la que SI se puebla sigue poblandose, para que la prueba no pase por vacia.
+  // 3. La que SI se puebla sigue poblandose, para que esto no pase por vacio.
+  assert.equal(env.DB._resp.length, 1);
   assert.equal(env.DB._resp[0].__columnas.includes("request_id"), true);
   assert.equal(env.DB._resp[0].request_id, res.headers.get(REQUEST_ID_HEADER));
 });
