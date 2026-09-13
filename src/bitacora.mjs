@@ -10,18 +10,34 @@
 // no se podia buscar en ninguna parte: el codigo no emitia ni una sola linea de
 // registro. Esto la emite.
 //
-// LO QUE ESTE MODULO SI DEMUESTRA Y LO QUE NO, que no es lo mismo y conviene no
-// mezclarlo nunca:
+// TRES COSAS DISTINTAS, Y NO HAY QUE MEZCLARLAS NUNCA:
 //
-//   · EL CODIGO EMITE EL REGISTRO: verificable localmente, y lo verifican las
-//     pruebas de test/bitacora.test.mjs.
-//   · QUE CLOUDFLARE LO CONSERVE, DURANTE CUANTO TIEMPO Y PERMITA BUSCARLO: NO
-//     DEMOSTRADO. Requiere validacion posterior al despliegue.
+//   1. EL CODIGO EMITE UN PAYLOAD ESTRUCTURADO de catorce campos. Esto es lo
+//      unico que depende de nosotros, y es verificable localmente: lo verifican
+//      las pruebas de test/bitacora.test.mjs, que comprueban que se llama una
+//      sola vez, con un solo argumento, que ese argumento es un OBJETO —no una
+//      cadena— y que sus claves son exactamente las catorce.
+//   2. CLOUDFLARE AÑADE LO SUYO al registro: marca de tiempo, identificadores de
+//      la invocacion, resultado, y lo que decida añadir. Eso no lo controlamos y
+//      no se duplica aqui; nuestros catorce campos son los que Cloudflare no
+//      puede saber.
+//   3. QUE ESE REGISTRO SE CONSERVE, DURANTE CUANTO TIEMPO, QUE LOS CATORCE
+//      CAMPOS QUEDEN INDEXADOS Y QUE SE PUEDA BUSCAR POR `request_id`: NO
+//      DEMOSTRADO. Es validacion en vivo, posterior al despliegue, y hasta
+//      hacerla no se afirma en ningun sitio.
 //
 // `head_sampling_rate = 1` en wrangler.toml dice que no se descarta ninguna
 // invocacion. No dice cuanto se retiene, ni que se pueda buscar por un campo
 // nuestro, ni que exista tal campo. De ahi NO se deduce ninguna garantia
 // operativa, y este comentario esta aqui para que nadie la deduzca luego.
+//
+// POR QUE SE EMITE UN OBJETO Y NO UNA CADENA. Cloudflare documenta la diferencia
+// y no es cosmetica: `console.log("...")` mete todo el contenido dentro de un
+// unico campo `message`, y entonces los catorce campos son texto dentro de texto
+// — se pueden leer con los ojos, no filtrar por uno de ellos. `console.log({...})`
+// es lo que permite que cada campo se pueda extraer e indexar por separado. Con
+// una cadena, `request_id` no seria un campo: seria una subcadena. Aqui se pasa
+// el objeto, y eso es lo maximo que el codigo puede hacer por el punto 3.
 //
 // ESTE MODULO NO IMPORTA NADA, a proposito: se carga antes que cualquier otra
 // cosa y no puede arrastrar un ciclo al arranque del Worker.
@@ -145,7 +161,11 @@ export function registrarIntento({ metodo, pathname, respuesta, requestId, ms, a
       rpc_codigo: Number.isInteger(a.rpc_codigo) ? a.rpc_codigo : null,
     };
 
-    console.log(JSON.stringify(linea));
+    // EL OBJETO, NO SU SERIALIZACION. Ver la cabecera: una cadena convierte los
+    // catorce campos en texto dentro de `message`, y un objeto es lo que permite
+    // que cada uno se pueda extraer por separado. UN SOLO ARGUMENTO, ademas: un
+    // segundo argumento se anexa al mensaje y desharia lo mismo.
+    console.log(linea);
     return true;
   } catch (_) {
     return false;                 // el registro nunca rompe una respuesta

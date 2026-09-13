@@ -1326,8 +1326,16 @@ export default {
       // PR-1 — EL 500 ES EL QUE MÁS FALTA HACÍA. Es la respuesta que no lleva
       // `check_id` (el motor no llegó a contestar), no lleva cuerpo útil y no
       // deja al cliente nada que citar. Ahora lleva `request_id` en la cabecera
-      // y dentro de `error`, y con eso se encuentra la invocación en los
-      // registros. Por eso `requestId` se genera fuera de este `try`.
+      // y dentro de `error`. Por eso `requestId` se genera fuera de este `try`.
+      //
+      // HASTA DÓNDE LLEGA ESO, dicho sin adornos: el código EMITE el
+      // identificador —al cliente, y a la bitácora como campo de un objeto
+      // estructurado (ver `registrarIntento` en bitacora.mjs)—. Que ese registro
+      // se CONSERVE en Cloudflare, que sus campos queden INDEXADOS y que se pueda
+      // BUSCAR por `request_id` no está demostrado todavía: es validación en
+      // vivo, posterior al despliegue. Hasta hacerla, lo que se puede prometer a
+      // quien reclama es que tiene un identificador que citarnos, no que nosotros
+      // ya podamos encontrar su invocación.
       respuesta = await sellar(errorResponse("INTERNAL", "Unexpected error.", 500));
     }
     // PR-1g — LA LÍNEA DE BITÁCORA, UNA SOLA VEZ Y DESDE UN SOLO SITIO.

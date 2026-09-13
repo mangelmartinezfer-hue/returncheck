@@ -133,23 +133,37 @@ function conFacilitador(fn) {
 
 // ---------------------------------------------------------------------------
 // EL ESPIA. Sustituye console.log, recoge lo emitido y SIEMPRE lo restituye.
-// Devuelve { respuesta, lineas, crudas }: `crudas` son las cadenas tal cual, que
-// es sobre lo que se buscan los testigos —si algo se filtrara dentro de un campo
-// anidado, buscarlo sobre el objeto analizado podria no verlo.
+//
+// PR-1j — GUARDA LOS ARGUMENTOS TAL CUAL, SIN CONVERTIRLOS. Antes hacia
+// `args.map(String)`, y eso destruia justo lo que ahora hay que poder comprobar:
+// si se emitio un OBJETO o una cadena. Con `String()` de por medio las dos cosas
+// se ven iguales, y la prueba que distingue una de otra seria imposible.
+//
+// Devuelve:
+//   · `llamadas` — un array por llamada con sus argumentos SIN TOCAR;
+//   · `lineas`   — las llamadas que son una linea de bitacora, ya como objeto;
+//   · `crudas`   — la vista en texto, derivada, para buscar testigos. Se serializa
+//                  con JSON.stringify para que la busqueda alcance CUALQUIER
+//                  nivel del objeto: si algo se filtrara dentro de un campo
+//                  anidado, mirar solo las claves de arriba no lo veria.
 // ---------------------------------------------------------------------------
 async function espiando(fn, { revienta = false } = {}) {
   const original = console.log;
-  const crudas = [];
+  const llamadas = [];
   console.log = (...args) => {
-    crudas.push(args.map(String).join(" "));
+    llamadas.push(args);
     if (revienta) throw new Error("el registro ha reventado a proposito");
   };
   let respuesta;
   try { respuesta = await fn(); }
   finally { console.log = original; }
-  const lineas = crudas.map((c) => { try { return JSON.parse(c); } catch (_) { return null; } })
-                       .filter((o) => o && o.msg === "rc.intento");
-  return { respuesta, lineas, crudas };
+
+  const enTexto = (v) => (typeof v === "string" ? v : JSON.stringify(v));
+  const crudas = llamadas.map((args) => args.map(enTexto).join(" "));
+  const lineas = llamadas
+    .map((args) => (args.length === 1 ? args[0] : null))
+    .filter((o) => o && typeof o === "object" && !Array.isArray(o) && o.msg === "rc.intento");
+  return { respuesta, llamadas, lineas, crudas };
 }
 
 const post = (ruta, cuerpo, env = ENV, headers = {}) =>
@@ -210,13 +224,61 @@ test("PR-1g: DOS lineas para el mismo intento harian fallar la prueba", async ()
   // un `assert.ok(lineas.length >= 1)`, un emisor llamado dos veces pasaria
   // desapercibido. Aqui se emite una linea de mas a proposito y se comprueba que
   // el conteo la ve.
+  //
+  // PR-1j — la linea artificial se emite como OBJETO, igual que la de verdad. Si
+  // se emitiera como cadena, el espia no la contaria como linea y este control
+  // pasaria por el motivo equivocado: parecerian dos formas distintas de no
+  // contar, cuando lo que se quiere comprobar es que SI cuenta dos.
   const { lineas } = await espiando(async () => {
     const r = await post("/v1/check", PETICION, { ...ENV, DB: db() });
-    console.log(JSON.stringify({ msg: "rc.intento", v: 1, request_id: "rc_req_duplicada" }));
+    console.log({ msg: "rc.intento", v: 1, request_id: "rc_req_duplicada" });
     return r;
   });
   assert.equal(lineas.length, 2, "el espia cuenta las dos, luego el conteo discrimina");
   assert.notEqual(lineas.length, 1, "y por tanto la asercion de la prueba anterior se pondria roja");
+});
+
+test("PR-1j: se emite un OBJETO de catorce campos, no una cadena", async () => {
+  // ---------------------------------------------------------------------
+  // POR QUE ESTA PRUEBA EXISTE. Cloudflare documenta la diferencia y no es
+  // cosmetica: `console.log("...")` mete todo el contenido en un unico campo
+  // `message`, y entonces los catorce campos son texto dentro de texto — se leen
+  // con los ojos, no se filtra por uno de ellos. `console.log({...})` es lo que
+  // permite extraerlos e indexarlos por separado.
+  //
+  // Hasta PR-1j emitiamos `JSON.stringify(linea)`, o sea una cadena: la forma que
+  // NO deja `request_id` como campo. Esta prueba fija la forma, no el contenido,
+  // porque el contenido ya lo vigilan las otras y la forma no la vigilaba nadie.
+  //
+  // LO QUE ESTA PRUEBA NO DEMUESTRA, y conviene no leerlo de mas: demuestra que
+  // EMITIMOS un objeto. Que Cloudflare lo conserve, lo indexe campo a campo y
+  // permita buscar por `request_id` es validacion en vivo, posterior al
+  // despliegue. Aqui acaba lo que depende de nosotros.
+  // ---------------------------------------------------------------------
+  const { llamadas, respuesta } = await espiando(() => conFacilitador(() =>
+    pagoHttp({ ...ENV, DB: db(), AI: ia("YES") })));
+  assert.equal(respuesta.status, 200, "la llamada ocurrio de verdad, no se prueba sobre vacio");
+
+  assert.equal(llamadas.length, 1, "exactamente UNA llamada a console.log");
+  const args = llamadas[0];
+  assert.equal(args.length, 1,
+    "exactamente UN argumento: un segundo se anexaria al mensaje y desharia lo mismo");
+
+  const payload = args[0];
+  assert.equal(typeof payload, "object", "el argumento es un objeto");
+  assert.notEqual(payload, null, "y no es null");
+  assert.equal(Array.isArray(payload), false, "y no es un array");
+  assert.notEqual(typeof payload, "string", "y NO es una cadena: eso lo enterraria en `message`");
+  assert.deepEqual(Object.keys(payload).sort(), CAMPOS,
+    "sus claves propias son exactamente los catorce campos aprobados");
+
+  // El control, para que las aserciones de arriba no se lean como triviales: una
+  // cadena con el MISMO contenido fallaria cada una de ellas.
+  const comoCadena = JSON.stringify(payload);
+  assert.equal(typeof comoCadena, "string");
+  assert.equal(Array.isArray(comoCadena), false);
+  assert.notDeepEqual(Object.keys(comoCadena).sort(), CAMPOS,
+    "si se emitiera la cadena, la comprobacion de claves se pondria roja");
 });
 
 test("PR-1g: los desenlaces SIN fila en answer_log si dejan linea", async () => {
@@ -386,8 +448,13 @@ test("PR-1g SECRETOS: ningun testigo del cliente aparece en el registro", async 
     }), env)));
 
   assert.equal(respuesta.status, 200, "la llamada ha ocurrido de verdad, no se prueba sobre vacio");
+  // PR-1j — se busca sobre `JSON.stringify` del OBJETO capturado, no sobre sus
+  // claves de primer nivel. Es deliberado: si algun dia un valor prohibido se
+  // colara dentro de un campo anidado, mirar solo arriba no lo veria, y esta es
+  // la unica prueba del fichero cuyo fallo seria una fuga y no una molestia.
   const todo = crudas.join("\n");
   assert.ok(todo.length > 0, "y ha emitido algo, para que lo de abajo no pase por vacio");
+  assert.match(todo, /^\{"msg":"rc.intento"/, "y lo capturado es el objeto serializado, no un `[object Object]`");
 
   const prohibidos = {
     "el texto de la politica que mando el cliente": TESTIGO_POLITICA,
