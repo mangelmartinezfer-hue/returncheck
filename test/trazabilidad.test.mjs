@@ -20,6 +20,7 @@ import { newRequestId, conRequestId, REQUEST_ID_HEADER, errorResponse, json } fr
 import { recordAnswer } from "../src/answerlog.mjs";
 import { meterEnSobre } from "../src/x402.mjs";
 import { huella } from "../src/idempotencia.mjs";
+import { validateRequest } from "../src/contract.mjs";
 import { cacheKey } from "../src/text.mjs";
 import { sha256full } from "../src/corpus.mjs";
 
@@ -761,23 +762,82 @@ test("PR-1 pagado: cobrarConX402 entrega __api_key Y __request_id a la vez", asy
 
 // --- 5. y 6. LA BARRERA MONETARIA ------------------------------------------
 
-test("PR-1 BARRERA: la huella de idempotencia NO cambia por el request_id", async () => {
-  // Si cambiara, un reintento legitimo se leeria como conflicto (409) o —peor—
-  // dejaria de reconocerse y se cobraria dos veces. La huella se calcula en
-  // cobro-x402.mjs:121 sobre `peticion`, ANTES de :139, y :139 construye un
-  // objeto NUEVO con la propagacion dentro. Esta prueba fija las dos cosas.
-  const aceptado = { scheme: "exact", network: RED_PAGO, amount: "20000",
-                     asset: ASSET, payTo: PAY_TO };
-  const peticion = { ...PETICION_PAGO };
-  const antes = await huella({ aceptado, metodo: "POST", ruta: "/v1/check", cuerpo: peticion });
+test("PR-1h BARRERA: la huella de idempotencia NO cambia por el request_id", async () => {
+  // ---------------------------------------------------------------------
+  // POR QUE IMPORTA. Si `__request_id` entrase en la huella, cada reintento
+  // daria una huella distinta: o se leeria como conflicto (409) o dejaria de
+  // reconocerse y se COBRARIA DOS VECES. Es la unica parte de PR-1 que puede
+  // costar dinero, asi que es la que hay que probar de verdad.
+  //
+  // COMO SE PRUEBA, Y POR QUE ASI. La version anterior de esta prueba calculaba
+  // `huella(...)` dos veces con EL MISMO objeto y comparaba los dos resultados.
+  // Eso es una tautologia: habria salido verde aunque `__request_id` entrase en
+  // la huella, porque el objeto enriquecido no llegaba a pasar por `huella`.
+  // Ademas calculaba sobre el cuerpo CRUDO, que no es lo que usa el camino real.
+  //
+  // Aqui no se lee el codigo ni se espia ningun import: se ejecuta el camino
+  // ENTERO por `worker.fetch` y se mira la huella que la D1 falsa RECIBE en el
+  // INSERT de `payment_idempotency`. Eso es lo que de verdad se guardo, y es
+  // contra lo que se comparara el proximo reintento.
+  // ---------------------------------------------------------------------
+  const ID_PAGO = "pay_huella000000000000000000000a";
+  const aceptado = sobrePago().accepted;
 
-  // Exactamente lo que hace cobro-x402.mjs:139.
-  const enriquecido = { ...peticion, __api_key: PAGADOR, __request_id: "rc_req_loquesea" };
+  // 1) La huella ESPERADA, sobre la salida de `validateRequest`, que es lo que el
+  //    router entrega a `cobrarConX402`.
+  const validada = validateRequest(PETICION_PAGO).value;
+  const esperada = await huella({ aceptado, metodo: "POST", ruta: "/v1/check", cuerpo: validada });
 
-  const despues = await huella({ aceptado, metodo: "POST", ruta: "/v1/check", cuerpo: peticion });
-  assert.equal(despues, antes, "la huella es la misma");
-  assert.equal("__request_id" in peticion, false, "y `peticion` no se ha mutado");
-  assert.equal(enriquecido.__request_id, "rc_req_loquesea");
+  // 2) El camino real, dos veces, con entornos NUEVOS.
+  const envA = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const resA = await conFacilitadorPago({}, () => pagoPorHttp(envA, sobrePago({ "payment-identifier": ID_PAGO })));
+  const envB = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const resB = await conFacilitadorPago({}, () => pagoPorHttp(envB, sobrePago({ "payment-identifier": ID_PAGO })));
+
+  assert.equal(resA.status, 200);
+  assert.equal(resB.status, 200);
+  const idA = resA.headers.get(REQUEST_ID_HEADER);
+  const idB = resB.headers.get(REQUEST_ID_HEADER);
+  assert.match(idA, RE_ID);
+  assert.notEqual(idA, idB, "los dos intentos llevan identificadores DISTINTOS, o no se prueba nada");
+
+  // 3) La huella observada es la esperada, y es la MISMA en los dos intentos.
+  assert.equal(envA.DB._idem.length, 1, "la fila de idempotencia se escribio de verdad");
+  assert.equal(envA.DB._idem[0].fingerprint, esperada,
+    "la huella guardada es la de la peticion validada, sin la propagacion");
+  assert.equal(envB.DB._idem[0].fingerprint, envA.DB._idem[0].fingerprint,
+    "y no cambia aunque el request_id sea otro");
+
+  // 4) CONTROL NEGATIVO 1 — que esta prueba DISCRIMINA. Si el camino usara el
+  //    objeto enriquecido, la huella seria esta otra. Que sea distinta es lo que
+  //    convierte el paso 3 en una afirmacion y no en una casualidad.
+  const conPropagacion = await huella({ aceptado, metodo: "POST", ruta: "/v1/check",
+    cuerpo: { ...validada, __api_key: PAGADOR, __request_id: idA } });
+  assert.notEqual(conPropagacion, esperada,
+    "el objeto enriquecido produce OTRA huella: la prueba se pondria roja si se usara");
+  assert.notEqual(envA.DB._idem[0].fingerprint, conPropagacion,
+    "y la observada no es esa");
+
+  // 5) CONTROL NEGATIVO 2 — que la huella depende del CUERPO. Sin esto, "igual
+  //    entre request_id distintos" tambien saldria verde si la huella ignorase
+  //    la peticion entera.
+  const envC = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  await conFacilitadorPago({}, () => pagoPorHttp(envC, sobrePago({ "payment-identifier": ID_PAGO }),
+    { ...PETICION_PAGO, buyer_country: "CA" }));
+  assert.notEqual(envC.DB._idem[0].fingerprint, esperada,
+    "otra peticion, otra huella: la huella si mira el cuerpo");
+
+  // 6) EL OBJETO CORRECTO. `validateRequest` no devuelve el cuerpo que llego: lo
+  //    completa con las claves del contrato que faltaban. Por eso la huella del
+  //    cuerpo crudo y la de la salida validada son distintas, y por eso el paso 1
+  //    tiene que usar la segunda. Se comprueba que la diferencia existe antes de
+  //    apoyarse en ella.
+  const soloEnValidada = Object.keys(validada).filter((k) => !(k in PETICION_PAGO));
+  assert.ok(soloEnValidada.length > 0,
+    "el contrato añade claves; si algun dia dejara de hacerlo, esta parte sobra");
+  const deCuerpoCrudo = await huella({ aceptado, metodo: "POST", ruta: "/v1/check", cuerpo: PETICION_PAGO });
+  assert.notEqual(deCuerpoCrudo, esperada, "crudo y validado NO dan la misma huella");
+  assert.equal(envA.DB._idem[0].fingerprint, esperada, "y el camino real usa la VALIDADA");
 });
 
 test("PR-1 BARRERA: la clave de cache NO cambia por el request_id", async () => {
