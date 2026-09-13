@@ -265,6 +265,70 @@ test("PR-1e: un error PROPIO de ReturnCheck conserva su error.request_id", async
   assert.equal(c.error.code, "INVALID_INPUT", "y su `code` es una CADENA, no un numero");
 });
 
+// ---------------------------------------------------------------------------
+// PR-1f — EL IDENTIFICADOR EN EL EXITO POR MCP.
+//
+// EL HUECO. En el camino feliz el identificador vivia SOLO en la cabecera HTTP
+// del transporte, y un cliente de MCP lee el RESULTADO de la herramienta, no
+// cabeceras. Quien solo consuma el resultado no tenia nada que citarnos justo en
+// la llamada que si le contesto. Va en `_meta`, que es el hueco que el propio
+// MCP reserva para lo que no cabe en el esquema, y NO en `structuredContent`,
+// que es el contrato v1.0 congelado.
+// ---------------------------------------------------------------------------
+
+const META_ID = "returncheck/request-id";
+
+test("PR-1f MCP: el exito del tramo gratis lleva el identificador en _meta", async () => {
+  const conSaldo = { ...ENV, DB: db(5), AI: { run: async () => ({ response: JSON.stringify({
+    verdict: "UNKNOWN", confidence: 0, answer_human: "Unknown.",
+    reason: "The policy text does not resolve this case.",
+    merchant_resolved: { name: "eval.example", domain: "eval.example", is_marketplace_third_party: false },
+    policy: null, evidence: null,
+  }) }) } };
+  const r = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "check_return", arguments: {
+    product_url: "https://eval.example/p/x", buyer_country: "US",
+    page_text: "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery.",
+  } } }, conSaldo, CLAVE);
+
+  assert.equal(r.status, 200);
+  const cab = r.headers.get(REQUEST_ID_HEADER);
+  const res = (await r.json()).result;
+  assert.equal(res.isError, false, "es un exito, que es el caso de esta prueba");
+  assert.equal(res._meta[META_ID], cab, "el mismo identificador que la cabecera de fuera");
+  assert.match(res._meta[META_ID], RE_ID);
+});
+
+test("PR-1f MCP: structuredContent SIGUE sin request_id", async () => {
+  // El contrato v1.0 no se ensancha. Es la frontera que PR-1f no cruza, y por
+  // eso el identificador va en `_meta` y no dentro del objeto de la respuesta.
+  const conSaldo = { ...ENV, DB: db(5), AI: { run: async () => ({ response: JSON.stringify({
+    verdict: "UNKNOWN", confidence: 0, answer_human: "Unknown.", reason: "No resuelve.",
+    merchant_resolved: { name: "eval.example", domain: "eval.example", is_marketplace_third_party: false },
+    policy: null, evidence: null,
+  }) }) } };
+  const r = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "check_return", arguments: {
+    product_url: "https://eval.example/p/x", buyer_country: "US",
+    page_text: "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery.",
+  } } }, conSaldo, CLAVE);
+  const res = (await r.json()).result;
+  assert.equal(res.structuredContent.request_id, undefined, "el contrato v1.0 no se toca");
+  assert.equal("request_id" in res.structuredContent, false);
+});
+
+test("PR-1f MCP: un resultado con isError NO recibe _meta", async () => {
+  // La decision es "exito". Un error ya lleva el identificador en
+  // structuredContent, y añadirle ademas `_meta` seria una tercera superficie
+  // para lo mismo.
+  const conSaldo = { ...ENV, DB: db(5) };
+  const r = await mcp({ jsonrpc: "2.0", id: 1, method: "tools/call",
+                        params: { name: "check_return", arguments: { buyer_country: "US" } } },
+                      conSaldo, CLAVE);
+  const res = (await r.json()).result;
+  assert.equal(res.isError, true);
+  assert.equal(res._meta, undefined, "los errores mantienen su contrato, sin _meta");
+  assert.match(res.structuredContent.error.request_id, RE_ID, "y su identificador sigue donde estaba");
+});
+
 test("PR-1e: un cuerpo con jsonrpc pero sin forma valida NO se toma por JSON-RPC", async () => {
   // La guarda se prueba por su contrapositivo: cinco cuerpos que llevan
   // `jsonrpc` y que, por fallar una condicion cada uno, tienen que recibir el
@@ -619,15 +683,35 @@ test("PR-1 pagado MCP: answer_log.request_id coincide con la cabecera HTTP", asy
   assert.equal(env.DB._resp.length, 1);
   assert.equal(env.DB._resp[0].request_id, requestId);
 
-  // LIMITE QUE HAY QUE DEJAR DICHO, y por eso se comprueba: en un exito de MCP el
-  // identificador viaja en la CABECERA HTTP del transporte, no dentro del
-  // resultado JSON-RPC. `sellarResultado` solo sella los errores (mcp.mjs:117), y
-  // en una respuesta buena `structuredContent` ES el objeto del contrato v1.0.
-  // Esto NO es identificacion autocontenida del resultado MCP.
-  const sc = (await res.json()).result.structuredContent;
-  assert.equal(sc.request_id, undefined,
-    "en exito MCP el identificador NO va dentro del resultado JSON-RPC");
-  assert.ok(sc.meta.check_id, "lo que si va dentro es el check_id, como siempre");
+  // PR-1f — `structuredContent` sigue siendo el contrato v1.0 sin tocar, y el
+  // identificador del resultado vive en `_meta`. Ver `sellarResultado` en
+  // mcp.mjs para por que se separan las dos cosas.
+  const r = (await res.json()).result;
+  assert.equal(r.structuredContent.request_id, undefined,
+    "el contrato v1.0 no gana un campo");
+  assert.ok(r.structuredContent.meta.check_id, "lo que si va dentro es el check_id, como siempre");
+  assert.equal(r._meta["returncheck/request-id"], requestId,
+    "y el resultado ya no depende de que el cliente mire cabeceras");
+});
+
+test("PR-1f pagado MCP: el exito CONFIRMADO conserva las DOS claves de _meta", async () => {
+  // LA UNICA PARTE DELICADA DE PR-1f. Un exito pagado y confirmado ya traia
+  // `_meta["x402/payment-response"]`, que es la prueba de que el dinero se movio.
+  // Si `sellarResultado` asignara `_meta` de una pieza en vez de fusionar, esa
+  // prueba desapareceria — y desapareceria en silencio, porque el resultado
+  // funcional seguiria siendo correcto. Esta prueba exige las dos a la vez.
+  const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
+  const res = await conFacilitadorPago({}, () => pagoPorMcp(env));
+  const requestId = res.headers.get(REQUEST_ID_HEADER);
+  const r = (await res.json()).result;
+
+  assert.equal(r.isError, false);
+  assert.deepEqual(Object.keys(r._meta).sort(), ["returncheck/request-id", "x402/payment-response"],
+    "las dos, y solo las dos");
+  assert.equal(r._meta["returncheck/request-id"], requestId);
+  assert.equal(r._meta["x402/payment-response"].transaction, TX_PAGO,
+    "la prueba de liquidacion sigue intacta");
+  assert.equal(r._meta["x402/payment-response"].success, true);
 });
 
 // --- 3. El 402 de liquidacion fallida, que SI deja fila ---------------------

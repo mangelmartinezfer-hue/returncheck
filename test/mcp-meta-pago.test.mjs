@@ -264,7 +264,8 @@ test("W51: una respuesta del TRAMO GRATIS no lleva x402 ni _meta", async () => {
   const res = await llamar(env);
   assert.ok(["YES", "YES_WITH_CONDITIONS"].includes(res.structuredContent.verdict));
   assert.equal(res.structuredContent.x402, undefined);
-  assert.equal(res._meta, undefined, "el estandar tampoco puede insinuar un pago que no hubo");
+  assert.equal(res._meta["x402/payment-response"], undefined,
+    "el estandar tampoco puede insinuar un pago que no hubo");
 });
 
 test("W51: UNKNOWN con autorizacion presentada — NO hubo liquidacion, ni x402 ni _meta", async () => {
@@ -274,7 +275,7 @@ test("W51: UNKNOWN con autorizacion presentada — NO hubo liquidacion, ni x402 
   const res = await conFacilitador({}, () => llamar(env, { meta: pagoObjeto() }));
   assert.equal(res.structuredContent.verdict, "UNKNOWN");
   assert.equal(res.structuredContent.x402, undefined);
-  assert.equal(res._meta, undefined);
+  assert.equal(res._meta["x402/payment-response"], undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -326,7 +327,8 @@ test("W51: en un reintento las dos formas tambien coinciden, con coste 0", async
   // el sobre del reintento no sirve para afirmarlo porque la huella NO cubre
   // payload.authorization.from y un reintento no vuelve a llamar al facilitador.
   // Antes se omite que se inventa un payer.
-  assert.equal(res._meta, undefined, "sin SettlementResponse estandar en replay");
+  assert.equal(res._meta["x402/payment-response"], undefined,
+    "sin SettlementResponse estandar en replay");
 });
 
 // ---------------------------------------------------------------------------
@@ -376,7 +378,8 @@ test("W51 pending: se sirve el resultado y el bloque, pero SIN _meta estandar", 
   assert.equal(res.structuredContent.x402.settlement, "pending");
   assert.equal(res.structuredContent.x402.transaction, TX, "la evidencia sigue estando");
   assert.equal(res.structuredContent.x402.cost_usd, "0.0200");
-  assert.equal(res._meta, undefined, "ni exito ni fallo estandar: no se emite");
+  assert.equal(res._meta["x402/payment-response"], undefined,
+    "ni exito ni fallo estandar: no se emite");
 });
 
 test("W51 unconfirmed: se sirve el resultado y el bloque, pero SIN _meta estandar", async () => {
@@ -386,7 +389,7 @@ test("W51 unconfirmed: se sirve el resultado y el bloque, pero SIN _meta estanda
   assert.ok(["YES", "YES_WITH_CONDITIONS"].includes(res.structuredContent.verdict));
   assert.equal(res.structuredContent.x402.settlement, "unconfirmed");
   assert.equal(res.structuredContent.x402.cost_usd, "0.0200");
-  assert.equal(res._meta, undefined);
+  assert.equal(res._meta["x402/payment-response"], undefined);
 });
 
 test("W51 LA REGLA: ningun estado incierto sale como success:false en un resultado normal", async () => {
@@ -401,7 +404,7 @@ test("W51 LA REGLA: ningun estado incierto sale como success:false en un resulta
   for (const [nombre, cfg] of casos) {
     const res = await conFacilitador(cfg, () => llamar(env, { meta: pagoObjeto() }));
     assert.equal(res.isError, false, nombre + ": se sirve");
-    assert.equal(res._meta, undefined, nombre + ": sin objeto estandar");
+    assert.equal(res._meta["x402/payment-response"], undefined, nombre + ": sin objeto estandar");
     assert.equal(JSON.stringify(res).includes('"success":false'), false,
       nombre + ": la palabra success:false no puede aparecer en el resultado");
   }
@@ -410,14 +413,71 @@ test("W51 LA REGLA: ningun estado incierto sale como success:false en un resulta
 test("W51: solo `confirmed` emite el objeto estandar — los otros tres no", async () => {
   const env = { ...ENV, DB: db(), AI: ia("YES") };
   const conf = await conFacilitador({}, () => llamar(env, { meta: pagoObjeto() }));
-  assert.ok(conf._meta, "confirmed si");
+  assert.ok(conf._meta["x402/payment-response"], "confirmed si");
   const pend = await conFacilitador(
     { settle: { success: false, errorReason: "settlement_pending", transaction: TX, network: RED, payer: PAYER } },
     () => llamar(env, { meta: pagoObjeto() }));
   const unc = await conFacilitador({ settleCae: true }, () => llamar(env, { meta: pagoObjeto() }));
-  assert.equal(pend._meta, undefined);
-  assert.equal(unc._meta, undefined);
+  assert.equal(pend._meta["x402/payment-response"], undefined);
+  assert.equal(unc._meta["x402/payment-response"], undefined);
   // El cuarto, replay, se comprueba en su propia prueba mas arriba.
+});
+
+// ---------------------------------------------------------------------------
+// PR-1f — LA COMPENSATORIA, Y POR QUE VA EN EL MISMO COMMIT QUE EL CAMBIO.
+//
+// Diez aserciones de este fichero decian `res._meta === undefined` para
+// significar "ninguna apariencia de liquidacion". Al meter el identificador de
+// peticion en `_meta`, `_meta` pasa a existir SIEMPRE en un exito, y esas diez
+// aserciones tuvieron que pasar a nombrar la clave: `x402/payment-response`.
+//
+// Ese cambio, por si solo, DEBILITA la guarda: diez aserciones repartidas son
+// diez sitios donde alguien puede relajar una sin que se note. Esta prueba
+// recoge la invariante de W51 entera, en un solo sitio y por su nombre, y
+// recorre los CINCO estados de una vez. La invariante queda mejor sujeta que
+// antes del cambio, no peor.
+//
+// Va en este mismo commit a proposito: no puede existir un commit intermedio
+// con las diez aserciones debilitadas y sin nada que ocupe su lugar.
+// ---------------------------------------------------------------------------
+
+test("PR-1f INVARIANTE W51, LOS CINCO ESTADOS: solo `confirmed` emite el objeto estandar", async () => {
+  const { validateRequest } = await import("../src/contract.mjs");
+  const { huella } = await import("../src/idempotencia.mjs");
+  const PENDIENTE = { success: false, errorReason: "settlement_pending", transaction: TX, network: RED, payer: PAYER };
+
+  const estados = [
+    // nombre          como se provoca                                             ¿objeto estandar?
+    ["confirmed",   () => conFacilitador({}, () => llamar({ ...ENV, DB: db(), AI: ia("YES") }, { meta: pagoObjeto() })),                      true],
+    ["pending",     () => conFacilitador({ settle: PENDIENTE }, () => llamar({ ...ENV, DB: db(), AI: ia("YES") }, { meta: pagoObjeto() })),   false],
+    ["unconfirmed", () => conFacilitador({ settleCae: true }, () => llamar({ ...ENV, DB: db(), AI: ia("YES") }, { meta: pagoObjeto() })),     false],
+    ["not_charged", () => conFacilitador({}, () => llamar({ ...ENV, DB: db(), AI: ia("UNKNOWN") }, { meta: pagoObjeto() })),                  false],
+    ["replay",      async () => {
+      const id = "reintento-pr1f-00001";
+      const h = await huella({ aceptado: ACEPTADO, metodo: "POST", ruta: "/mcp",
+                               cuerpo: validateRequest(PETICION).value });
+      const guardada = JSON.stringify({ schema_version: "1.0", verdict: "YES", returnable: true, policy: null, evidence: null });
+      const env = { ...ENV, AI: ia("YES"),
+        DB: db({ idemFila: { payment_id: id, fingerprint: h, response_json: guardada,
+                             http_status: 200, transaction_hash: TX, expires_at: "2099-01-01T00:00:00.000Z" } }) };
+      return llamar(env, { meta: pagoObjeto({ id }) });
+    }, false],
+  ];
+
+  let vistos = 0;
+  for (const [nombre, correr, emite] of estados) {
+    const res = await correr();
+    assert.equal(res.isError, false, nombre + ": es un resultado servido, no un error");
+    const estandar = res._meta && res._meta["x402/payment-response"];
+    if (emite) assert.ok(estandar, nombre + ": TIENE que emitir el objeto estandar");
+    else assert.equal(estandar, undefined, nombre + ": NO puede emitir el objeto estandar");
+
+    // Y lo que PR-1f añade va en los cinco, emitan o no la prueba de pago.
+    assert.match(res._meta["returncheck/request-id"], /^rc_req_/,
+      nombre + ": el identificador de peticion va en los cinco");
+    vistos++;
+  }
+  assert.equal(vistos, 5, "los cinco estados se han ejercitado, ninguno se salto por vacio");
 });
 
 // ---------------------------------------------------------------------------
@@ -512,7 +572,7 @@ test("W51 INVARIANTE, POR LA RUTA REAL: un settle sin pagador no sale como confi
   const res = await conFacilitador({ settle: { success: true, transaction: TX, network: RED } },
     () => llamar(env, { meta: pagoObjeto() }));
   assert.equal(res.isError, false, "el resultado funcional se sirve igual");
-  assert.equal(res._meta, undefined, "pero sin evidencia estandar");
+  assert.equal(res._meta["x402/payment-response"], undefined, "pero sin evidencia estandar");
   assert.equal(res.structuredContent.x402.settlement, "unconfirmed");
   assert.equal(JSON.stringify(res).includes('"success":false'), false);
 });

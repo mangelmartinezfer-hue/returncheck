@@ -83,6 +83,13 @@ function bearer(request) {
   return m ? m[1].trim() : null;
 }
 
+// PR-1f — La clave de `_meta` donde viaja el identificador en una respuesta
+// buena. Lleva prefijo de espacio de nombres, como `x402/payment-response`,
+// porque `_meta` es un cajon compartido y un nombre pelado colisiona el dia que
+// otro lo use. Vive aqui arriba, con un nombre, para que no se escriba a mano en
+// dos sitios y acaben diciendo cosas distintas.
+const META_REQUEST_ID = "returncheck/request-id";
+
 function rpcResult(id, result) { return { jsonrpc: "2.0", id, result }; }
 function rpcError(id, code, message, requestId = null) {
   const error = { code, message };
@@ -103,18 +110,42 @@ function rpcError(id, code, message, requestId = null) {
  * quince sitios acaba faltando en uno. Se sella una vez, en `handleRpc`, por
  * donde pasan todos.
  *
- * SOLO SE TOCAN LOS ERRORES. En una respuesta buena `structuredContent` ES el
- * objeto del contrato v1.0, y ahi no se mete nada: el identificador viaja en la
- * cabecera. Un error, en cambio, hasta hoy era TEXTO PELADO —`toolText` no
- * devolvia ningun campo estructurado— y un agente no puede leer un parrafo.
+ * `structuredContent` NO SE TOCA EN UNA RESPUESTA BUENA. Ahi `structuredContent`
+ * ES el objeto del contrato v1.0 y no se le añade nada. Un error, en cambio,
+ * hasta hoy era TEXTO PELADO —`toolText` no devolvia ningun campo estructurado—
+ * y un agente no puede leer un parrafo.
  *
  * OJO CON `error`, QUE AQUI TAMBIEN SIGNIFICA DOS COSAS: en el reto de pago
  * (`retoMcp` -> `structuredContent` = el cuerpo del reto) `error` es una CADENA
  * de la especificacion x402, no un objeto. Meterle un campo dentro corromperia
  * el reto, asi que en ese caso el identificador va en la raiz.
+ *
+ * PR-1f — Y EN EL EXITO, `_meta`. Ver `META_REQUEST_ID` aqui abajo.
  */
 function sellarResultado(result, requestId) {
-  if (!result || !requestId || !result.isError) return result;
+  if (!result || !requestId) return result;
+
+  // PR-1f — EXITO: el identificador en `_meta`, FUSIONADO.
+  //
+  // POR QUE HACIA FALTA. En el camino feliz el identificador vivia SOLO en la
+  // cabecera HTTP del transporte, y mcp.mjs ya explica unas lineas mas arriba
+  // que un cliente de MCP no mira cabeceras: lee el resultado de la herramienta.
+  // Quien solo consuma el resultado no tenia nada que citarnos justo en la
+  // llamada que si le contesto.
+  //
+  // POR QUE `_meta` Y NO UN CAMPO DE `structuredContent`. `structuredContent` es
+  // el objeto del contrato v1.0, congelado. `_meta` es el hueco que el propio
+  // MCP reserva para datos fuera del esquema, y ya lo usamos para el
+  // SettlementResponse del estandar x402 (ver `resultadoConPago`).
+  //
+  // SE FUSIONA, NUNCA SE ASIGNA ENTERO, y esto es lo unico delicado de todo el
+  // cambio: un exito PAGADO Y CONFIRMADO ya trae `_meta["x402/payment-response"]`.
+  // Asignar `_meta` de una pieza borraria la prueba de que se pago. Hay prueba
+  // dedicada que exige las DOS claves en la misma respuesta.
+  if (!result.isError) {
+    result._meta = { ...(result._meta || {}), [META_REQUEST_ID]: requestId };
+    return result;
+  }
 
   const sc = (result.structuredContent && typeof result.structuredContent === "object"
               && !Array.isArray(result.structuredContent)) ? result.structuredContent : null;
