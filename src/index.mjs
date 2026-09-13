@@ -16,6 +16,7 @@ import { freeTrial } from "./freetier.mjs";
 import { readMetrics } from "./metrics.mjs";
 import { json, errorResponse, todayDate, BUILD, newRequestId, conRequestId } from "./util.mjs";
 import { deploymentInfo } from "./build-info.mjs";
+import { registrarIntento } from "./bitacora.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
@@ -1089,10 +1090,17 @@ export default {
     // exactamente la respuesta en la que el cliente más necesita algo que
     // citarnos. Fuera del `try` no hay forma de que falte.
     const requestId = newRequestId();
+    // PR-1g — el cronómetro y la libreta de la bitácora. `apunte` es una libreta
+    // que los manejadores RELLENAN de paso y nadie lee para decidir nada: el
+    // código de error lo escribe `conRequestId`, que ya analiza el cuerpo de los
+    // errores, y los campos de JSON-RPC los escribe `handleMcp`. Así no hay que
+    // volver a leer nada al final.
+    const t0 = Date.now();
+    const apunte = { error_code: null, rpc: null, rpc_n: null, rpc_codigo: null };
     // Un solo punto de salida para TODAS las rutas: ver `conRequestId` en
     // util.mjs para por qué esto es un envoltorio y no un parámetro repetido
     // cuarenta veces.
-    const sellar = (resp) => conRequestId(resp, requestId);
+    const sellar = (resp) => conRequestId(resp, requestId, apunte);
     // El despacho entero, tal cual estaba. Se saca del `try` para que el sellado
     // pase por el MISMO sitio en los dos desenlaces —respuesta normal y 500—, y
     // para que no haya que acordarse de sellar en cada `return` de los cuarenta
@@ -1107,7 +1115,7 @@ export default {
         return educated402(env, "This endpoint is not the x402 path. x402 is live on POST /v1/check (PAYMENT-SIGNATURE header) and on the check_return MCP tool (payment_signature argument).");
       if (request.method === "POST" && p === "/webhooks/stripe") return await handleStripeWebhook(request, env);
       // Servidor MCP (Streamable HTTP): descubrimiento y llamada de check_return por agentes.
-      if (p === "/mcp") return await handleMcp(request, env, requestId);
+      if (p === "/mcp") return await handleMcp(request, env, requestId, apunte);
       // Manifiestos de descubrimiento para agentes/crawlers.
       if (request.method === "GET" && p === "/llms.txt") return llmsTxt(env);
       if (request.method === "GET" && p === "/data-policy") return dataPolicy(env);
@@ -1303,15 +1311,36 @@ export default {
       return errorResponse("INVALID_INPUT", "Not found.", 404);
     };
 
+    let respuesta;
     try {
-      return await sellar(await despachar());
+      respuesta = await sellar(await despachar());
     } catch (e) {
       // PR-1 — EL 500 ES EL QUE MÁS FALTA HACÍA. Es la respuesta que no lleva
       // `check_id` (el motor no llegó a contestar), no lleva cuerpo útil y no
       // deja al cliente nada que citar. Ahora lleva `request_id` en la cabecera
       // y dentro de `error`, y con eso se encuentra la invocación en los
       // registros. Por eso `requestId` se genera fuera de este `try`.
-      return await sellar(errorResponse("INTERNAL", "Unexpected error.", 500));
+      respuesta = await sellar(errorResponse("INTERNAL", "Unexpected error.", 500));
     }
+    // PR-1g — LA LÍNEA DE BITÁCORA, UNA SOLA VEZ Y DESDE UN SOLO SITIO.
+    //
+    // POR QUÉ AQUÍ Y NO DENTRO DEL `try`. Los dos desenlaces —la respuesta
+    // normal y el 500 del `catch`— confluyen en esta línea antes de salir, así
+    // que "exactamente una por intento" es una propiedad de la FORMA de esta
+    // función y no algo que haya que acordarse de cumplir en cuarenta `return`.
+    // Es el mismo argumento por el que `sellar` es un envoltorio.
+    //
+    // VA DESPUÉS DE SELLAR para que lea el estado y las cabeceras definitivos, y
+    // DESPUÉS de tener la respuesta construida para que no pueda alterarla: si
+    // `registrarIntento` fallara, la respuesta ya está hecha y se sirve igual.
+    //
+    // La puerta de rutas vive dentro de `registrarIntento`, no aquí: es parte de
+    // lo que ese módulo garantiza, y repetirla aquí sería tener dos listas que
+    // se parecen.
+    registrarIntento({
+      metodo: request.method, pathname: p, respuesta, requestId,
+      ms: Date.now() - t0, apunte,
+    });
+    return respuesta;
   },
 };

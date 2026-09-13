@@ -13,6 +13,7 @@ import { x402Activo, validarSobreDePago, validarPagoDecodificado, sacarDelSobre,
 import { retoConPuertaHumana, cobrarConX402 } from "./cobro-x402.mjs";
 import { canonico } from "./idempotencia.mjs";
 import { REQUEST_ID_HEADER } from "./util.mjs";
+import { clasificarRpc } from "./bitacora.mjs";
 
 const DEFAULT_PROTOCOL = "2025-06-18";
 
@@ -585,8 +586,33 @@ const CORS = {
   "access-control-allow-headers": "content-type, authorization, mcp-protocol-version, mcp-session-id",
 };
 
+/**
+ * PR-1g — LO QUE ESTE TRANSPORTE LE APUNTA A LA BITACORA.
+ *
+ * Por HTTP la ruta ya dice que se intento. Por MCP no: todo pasa por `/mcp`, y
+ * sin esto una linea de registro de un `initialize` y la de una compra fallida
+ * serian indistinguibles. Se apuntan tres cosas y ninguna es texto del cliente:
+ * el metodo contra una lista cerrada (`clasificarRpc`), cuantos mensajes traia
+ * el lote, y el codigo JSON-RPC si hubo error de protocolo.
+ *
+ * EL NOMBRE DE LA HERRAMIENTA NO SE APUNTA. Lo elige quien llama, asi que es
+ * texto suyo, y por el registro no pasa texto suyo. Una herramienta desconocida
+ * se distingue igual de bien: rpc="tools/call" con rpc_codigo=-32602.
+ */
+function apuntar(apunte, campos) {
+  if (!apunte || typeof apunte !== "object") return;
+  if ("rpc" in campos) apunte.rpc = campos.rpc;
+  if ("rpc_n" in campos) apunte.rpc_n = campos.rpc_n;
+  if ("rpc_codigo" in campos) apunte.rpc_codigo = campos.rpc_codigo;
+}
+
+/** El codigo de error JSON-RPC de una respuesta, si lo hubo. Nunca su mensaje. */
+function codigoDe(r) {
+  return r && r.error && typeof r.error.code === "number" ? r.error.code : null;
+}
+
 // Punto de entrada del transporte Streamable HTTP.
-export async function handleMcp(request, env, requestId = null) {
+export async function handleMcp(request, env, requestId = null, apunte = null) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
   // GET (stream servidor->cliente) opcional: no lo soportamos -> 405 permitido por la spec.
   if (request.method === "GET") return new Response("Method Not Allowed", { status: 405, headers: CORS });
@@ -595,7 +621,11 @@ export async function handleMcp(request, env, requestId = null) {
 
   let body;
   try { body = await request.json(); }
-  catch { return jsonRpcHttp(rpcError(null, -32700, "Parse error", requestId), 400, requestId); }
+  catch {
+    // No hay mensaje que clasificar: `rpc` se queda en null, que es la verdad.
+    apuntar(apunte, { rpc_codigo: -32700 });
+    return jsonRpcHttp(rpcError(null, -32700, "Parse error", requestId), 400, requestId);
+  }
 
   const apiKey = bearer(request);
 
@@ -606,11 +636,16 @@ export async function handleMcp(request, env, requestId = null) {
       const r = await handleRpc(m, env, apiKey, request, requestId);
       if (r) out.push(r);
     }
+    // Del lote se apunta cuantos venian y el codigo del PRIMER error, que es por
+    // donde se empieza a mirar cuando alguien reclama por un lote.
+    apuntar(apunte, { rpc: "lote", rpc_n: body.length,
+                      rpc_codigo: (out.map(codigoDe).find((c) => c !== null) ?? null) });
     if (out.length === 0) return new Response(null, { status: 202, headers: CORS });
     return jsonRpcHttp(out, 200, requestId);
   }
 
   const r = await handleRpc(body, env, apiKey, request, requestId);
+  apuntar(apunte, { rpc: clasificarRpc(body && body.method), rpc_n: 1, rpc_codigo: codigoDe(r) });
   if (!r) return new Response(null, { status: 202, headers: CORS }); // era notificación
   return jsonRpcHttp(r, 200, requestId);
 }
