@@ -89,15 +89,24 @@ export const REQUEST_ID_HEADER = "X-ReturnCheck-Request-Id";
  * sería corromper el reto, así que va en la raíz. Nunca se toca `accepts` ni
  * `resource`: el contrato con el agente y con el facilitador se queda como está.
  *
- * Y NO SE TOCA EL SOBRE `PAYMENT-REQUIRED`, que se construye aparte en
- * index.mjs:853 sobre `r.reto` y no pasa por aquí. Esa era la regla de W32 —en
- * el sobre no se mete nada que el facilitador no espere— y sigue en pie.
+ * Y NO SE TOCA EL SOBRE `PAYMENT-REQUIRED`, que construye `reto402` en
+ * index.mjs sobre `r.reto` y no pasa por aquí. Esa era la regla de W32 —en el
+ * sobre no se mete nada que el facilitador no espere— y sigue en pie.
+ *
+ * PR-1e — Y TAMPOCO SE TOCA UNA RESPUESTA JSON-RPC. Ver `esRespuestaJsonRpc`
+ * aquí abajo: ese cuerpo ya trae el identificador donde su protocolo lo guarda,
+ * y añadírselo otra vez creaba un campo que JSON-RPC no contempla.
  *
  * Nunca lanza: si el cuerpo no se puede releer o no era JSON, se devuelve la
  * respuesta con la cabecera puesta. Perder el campo del cuerpo es malo; tumbar
  * una respuesta buena por intentar añadirlo sería peor.
+ *
+ * `apunte` es un objeto OPCIONAL que se rellena de paso, nunca se lee: recoge
+ * `error_code` para la bitácora (ver `registrarIntento` en bitacora.mjs). Se
+ * aprovecha que aquí ya se analiza el cuerpo de los errores, para no volver a
+ * leerlo después. Si no se pasa, esta función se comporta igual que antes.
  */
-export async function conRequestId(resp, requestId) {
+export async function conRequestId(resp, requestId, apunte = null) {
   try {
     if (!resp || !requestId) return resp;
 
@@ -114,6 +123,14 @@ export async function conRequestId(resp, requestId) {
     if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo))
       return new Response(texto, { status: resp.status, statusText: resp.statusText, headers: cabeceras });
 
+    anotarErrorCode(apunte, cuerpo);
+
+    // PR-1e — UNA SOLA FORMA POR PROTOCOLO. Un error JSON-RPC sale de aquí tal y
+    // como lo construyó `rpcError` en mcp.mjs, con el identificador en
+    // `error.data` y en ningún sitio más.
+    if (esRespuestaJsonRpc(cuerpo))
+      return new Response(texto, { status: resp.status, statusText: resp.statusText, headers: cabeceras });
+
     if (cuerpo.error && typeof cuerpo.error === "object" && !Array.isArray(cuerpo.error))
       cuerpo.error.request_id = requestId;
     else
@@ -125,6 +142,66 @@ export async function conRequestId(resp, requestId) {
   } catch (_) {
     return resp;                                  // nunca rompe una respuesta
   }
+}
+
+/**
+ * PR-1e — ¿ES ESTE CUERPO UNA RESPUESTA DE ERROR JSON-RPC 2.0?
+ *
+ * POR QUÉ HACE FALTA. El error de PARSEO del MCP es el único error JSON-RPC que
+ * sale con código HTTP >= 400 (los demás salen con 200), así que era el único
+ * que llegaba a la rama de arriba. Allí `cuerpo.error` es un objeto, y el
+ * envoltorio le metía un `request_id` al lado de `data`. Resultado: el MISMO
+ * identificador en dos sitios y, peor, un campo que la especificación JSON-RPC
+ * 2.0 no contempla — el objeto de error admite `code`, `message` y `data`.
+ *
+ * POR QUÉ SE EXIGE LA FORMA ENTERA Y NO SOLO `jsonrpc`. Clasificar por tener una
+ * propiedad suelta es cómo se acaba tratando como JSON-RPC un cuerpo que no lo
+ * es, y entonces un error NUESTRO se quedaría sin identificador en el cuerpo sin
+ * que nadie se entere. Se piden las seis condiciones de una respuesta de error
+ * del protocolo:
+ *
+ *   · `jsonrpc` es exactamente la cadena "2.0"  (no "truthy", no 2.0 numérico)
+ *   · el miembro `id` está PRESENTE, aunque valga null (lo vale en el parse error)
+ *   · NO hay `result`: `result` y `error` se excluyen mutuamente
+ *   · `error` es un objeto, no un array
+ *   · `error.code` es un NÚMERO — aquí es donde se separa solo del contrato de
+ *     ReturnCheck, cuyo `code` es una CADENA ("INVALID_INPUT", "CONFLICT"...)
+ *   · `error.message` es una cadena
+ *
+ * El contrato de error de ReturnCheck no cumple ninguna de las tres primeras, de
+ * modo que sigue recibiendo su `error.request_id` como siempre. Hay prueba que
+ * lo fija por los dos lados.
+ */
+function esRespuestaJsonRpc(cuerpo) {
+  if (!cuerpo || typeof cuerpo !== "object" || Array.isArray(cuerpo)) return false;
+  if (cuerpo.jsonrpc !== "2.0") return false;
+  if (!("id" in cuerpo)) return false;
+  if ("result" in cuerpo) return false;
+  const e = cuerpo.error;
+  if (!e || typeof e !== "object" || Array.isArray(e)) return false;
+  return typeof e.code === "number" && typeof e.message === "string";
+}
+
+/**
+ * PR-1g — EL CÓDIGO DE ERROR, PARA LA BITÁCORA, SIN TEXTO DEL CLIENTE.
+ *
+ * Solo se apunta un `code` que tenga la forma de los nuestros: MAYÚSCULAS y
+ * guiones bajos, 40 caracteres como mucho. No es decoración: es lo que garantiza
+ * que por este campo no pueda colarse una frase, una URL ni un secreto aunque
+ * alguien, algún día, ponga en `code` algo que no sea una constante nuestra. Lo
+ * que no case, se apunta como `null`, que es "no lo sé" y no una invención.
+ *
+ * El `code` de JSON-RPC es un número y por eso no casa: esa información viaja en
+ * `rpc_codigo`, que la pone mcp.mjs.
+ */
+const ERROR_CODE_SEGURO = /^[A-Z][A-Z_]{0,39}$/;
+
+function anotarErrorCode(apunte, cuerpo) {
+  if (!apunte || typeof apunte !== "object") return;
+  const code = cuerpo && cuerpo.error && typeof cuerpo.error === "object" && !Array.isArray(cuerpo.error)
+    ? cuerpo.error.code
+    : null;
+  if (typeof code === "string" && ERROR_CODE_SEGURO.test(code)) apunte.error_code = code;
 }
 
 // Clave de API pública para un cliente nuevo.

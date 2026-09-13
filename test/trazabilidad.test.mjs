@@ -206,6 +206,100 @@ test("PR-1 MCP: un error de PARSEO tambien lo lleva", async () => {
   assert.equal(c.error.data.request_id, cab);
 });
 
+// ---------------------------------------------------------------------------
+// PR-1e — UNA SOLA FORMA POR PROTOCOLO.
+//
+// EL DEFECTO QUE CIERRAN ESTAS CUATRO. El error de parseo es el unico error
+// JSON-RPC que sale con codigo HTTP >= 400; los demas salen con 200 y el
+// envoltorio ni siquiera les lee el cuerpo. Por eso solo a ese le llegaba la
+// rama que mete `request_id` dentro de `error`, y salia con el identificador
+// DOS veces: en `error.data.request_id` —donde lo pone `rpcError`— y en
+// `error.request_id`, que la especificacion JSON-RPC 2.0 no contempla.
+//
+// Las cuatro van juntas a proposito: dos fijan que el duplicado se fue, y las
+// otras dos que NO se ha apagado el sellado general para conseguirlo, que es la
+// forma facil y equivocada de arreglar esto.
+// ---------------------------------------------------------------------------
+
+test("PR-1e MCP: el error de PARSEO ya NO duplica el identificador", async () => {
+  const r = await worker.fetch(new Request("https://rc.example/mcp", {
+    method: "POST", headers: { "content-type": "application/json" }, body: "{esto no es json",
+  }), ENV);
+  assert.equal(r.status, 400);
+  const cab = r.headers.get(REQUEST_ID_HEADER);
+  const c = await r.json();
+
+  assert.equal(c.error.data.request_id, cab, "sigue donde JSON-RPC guarda lo adicional");
+  assert.equal(c.error.request_id, undefined,
+    "y ya NO al lado de `data`: ese campo no existe en JSON-RPC 2.0");
+  assert.equal("request_id" in c.error, false, "ni siquiera como clave con undefined");
+  assert.equal(c.error.code, -32700, "el error sigue siendo el que era");
+  assert.equal(c.jsonrpc, "2.0");
+  assert.equal(c.id, null);
+});
+
+test("PR-1e MCP: method not found (HTTP 200) no ha cambiado", async () => {
+  // No pasa por la rama del cuerpo —sale con 200— y tiene que seguir igual.
+  const r = await mcp({ jsonrpc: "2.0", id: 7, method: "metodo/que/no/existe" });
+  assert.equal(r.status, 200);
+  const cab = r.headers.get(REQUEST_ID_HEADER);
+  const c = await r.json();
+  assert.equal(c.error.data.request_id, cab);
+  assert.equal(c.error.request_id, undefined);
+  assert.deepEqual(Object.keys(c.error).sort(), ["code", "data", "message"],
+    "el objeto de error tiene EXACTAMENTE los tres miembros del protocolo");
+});
+
+test("PR-1e: un error PROPIO de ReturnCheck conserva su error.request_id", async () => {
+  // El control que impide "arreglar" el duplicado apagando el sellado entero.
+  // Este cuerpo tambien es un error con `error` objeto y tambien sale con >= 400,
+  // pero no es JSON-RPC y tiene que seguir llevando el identificador dentro.
+  // Con clave y saldo se llega a validar el cuerpo; sin clave saldria antes el
+  // reto de pago, igual que en la prueba de mas arriba.
+  const conSaldo = { ...ENV, DB: db(5) };
+  const r = await post("/v1/check", { product_url: "no-es-una-url", buyer_country: "US" }, conSaldo, CLAVE);
+  assert.equal(r.status, 400);
+  const cab = r.headers.get(REQUEST_ID_HEADER);
+  const c = await r.json();
+  assert.equal(c.error.request_id, cab, "el contrato de ReturnCheck no se toca");
+  assert.equal(c.error.code, "INVALID_INPUT", "y su `code` es una CADENA, no un numero");
+});
+
+test("PR-1e: un cuerpo con jsonrpc pero sin forma valida NO se toma por JSON-RPC", async () => {
+  // La guarda se prueba por su contrapositivo: cinco cuerpos que llevan
+  // `jsonrpc` y que, por fallar una condicion cada uno, tienen que recibir el
+  // identificador en el cuerpo como cualquier otro error nuestro. Si la guarda
+  // se relajara a "tiene jsonrpc", cualquiera de estos se quedaria sin el.
+  const casos = {
+    "code como cadena, que es la forma NUESTRA":
+      { jsonrpc: "2.0", id: 1, error: { code: "INVALID_INPUT", message: "x" } },
+    "result y error a la vez, que el protocolo excluye":
+      { jsonrpc: "2.0", id: 1, result: {}, error: { code: -32600, message: "x" } },
+    "sin miembro id":
+      { jsonrpc: "2.0", error: { code: -32600, message: "x" } },
+    "version que no es la cadena 2.0":
+      { jsonrpc: 2.0, id: 1, error: { code: -32600, message: "x" } },
+    "message ausente":
+      { jsonrpc: "2.0", id: 1, error: { code: -32600 } },
+  };
+  for (const [nombre, cuerpo] of Object.entries(casos)) {
+    const r = await conRequestId(json(cuerpo, { status: 400 }), "rc_req_guarda");
+    const c = await r.json();
+    assert.equal(c.error.request_id, "rc_req_guarda", nombre + ": tiene que llevarlo");
+  }
+
+  // Y el positivo, para que el bucle de arriba no pase por vacio: la forma
+  // ENTERA si se reconoce y el cuerpo sale intacto.
+  const bueno = await conRequestId(
+    json({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "Parse error", data: { request_id: "rc_req_ya" } } },
+         { status: 400 }),
+    "rc_req_guarda");
+  const cb = await bueno.json();
+  assert.equal(cb.error.request_id, undefined, "la forma entera SI se respeta");
+  assert.equal(cb.error.data.request_id, "rc_req_ya", "y lo que ya traia no se pisa");
+  assert.equal(bueno.headers.get(REQUEST_ID_HEADER), "rc_req_guarda", "la cabecera va igual");
+});
+
 test("PR-1 MCP: un error de herramienta lleva structuredContent.error.request_id", async () => {
   // Esto es el punto de cambio: `toolText` devolvia texto pelado, sin un solo
   // campo que un agente pudiera leer sin analizar una frase en ingles.
