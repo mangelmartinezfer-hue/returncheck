@@ -4,10 +4,12 @@
 //
 // POR QUE EXISTE. Hasta hoy la version del codigo era una cadena escrita a mano
 // en `util.mjs`, y una cadena escrita a mano solo dice la verdad si alguien se
-// acuerda de cambiarla. No se acordo: el commit de W57 (9a6d4e7) no la toco, y
-// durante seis dias el servicio anuncio un build que no era el suyo. Una prueba
-// que obligase a acordarse habria perpetuado el mismo fallo humano con un paso
-// mas. Asi que la cadena deja de escribirse y pasa a leerse de git.
+// acuerda de cambiarla. No se acordo: el commit de W57 (9a6d4e7) toco codigo y no
+// la actualizo, de modo que se quedo anunciando W56. W57 no llego a desplegarse,
+// asi que ese desajuste no llego a servirse; el mecanismo, sin embargo, no lo
+// impedia. Una prueba que obligase a acordarse habria perpetuado el mismo fallo
+// humano con un paso mas. Asi que la cadena deja de escribirse y pasa a leerse
+// de git.
 //
 // QUE ESCRIBE. Datos CRUDOS, no derivados: el commit, su fecha, si el arbol
 // estaba limpio y cuando se genero. La cadena `build` se deriva al LEER
@@ -65,6 +67,14 @@ const commitDate = git("show", "-s", "--format=%cs", "HEAD");
 // sucio. Puede acabar dentro del artefacto igual que uno modificado, y ademas
 // con `-uno` un artefacto al que se le olvidara el .gitignore se volveria
 // invisible justo para la comprobacion que existe para atraparlo.
+//
+// Y LO QUE ESTA MEDIDA NO VE: `--porcelain` SIN `--ignored` no lista los ficheros
+// IGNORADOS. Un fichero que case con .gitignore puede aparecer, cambiar o
+// desaparecer y esto seguira diciendo `true`. Entre ellos esta el sello que
+// escribe este mismo programa, que vive dentro de `src/` y por tanto dentro de lo
+// que wrangler empaqueta. Por eso `tree_clean` describe el estado de los ficheros
+// RASTREADOS, no el artefacto; la huella del artefacto es `bundle_sha256`, que
+// queda para PR-3.
 const porcelain = git("status", "--porcelain");
 
 const datos = {

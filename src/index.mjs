@@ -420,11 +420,19 @@ function discoveryDocument(env) {
   return {
     name: "ReturnCheck",
     build: BUILD,
-    // PR-1c — QUÉ CÓDIGO EXACTO ACABA DE RESPONDER. `build` se queda donde
-    // estaba (hay agentes leyéndolo) pero ya no es una cadena escrita a mano:
-    // sale de aquí dentro. Los cinco campos son la forma congelada del bloque —
-    // si algún día entra `bundle_sha256` se añade, pero estos cinco no cambian
-    // ni desaparecen, porque un manifiesto que cambia de forma no se puede citar.
+    // PR-1c — DE DÓNDE SALE EL SERVICIO QUE ACABA DE RESPONDER. `build` se queda
+    // donde estaba (hay agentes leyéndolo) pero ya no es una cadena escrita a
+    // mano: sale de aquí dentro. Los cinco campos son la forma congelada del
+    // bloque — si algún día entra `bundle_sha256` se añade, pero estos cinco no
+    // cambian ni desaparecen, porque un manifiesto que cambia de forma no se
+    // puede citar.
+    //
+    // CON SU ALCANCE, que es menos de lo que parece: `version_id` identifica la
+    // versión que atiende; `commit` y `tree_clean` describen el estado de los
+    // ficheros RASTREADOS al generar el sello, y NO cubren los ignorados —entre
+    // ellos el propio sello, que vive dentro de `src/`—. La huella del artefacto
+    // desplegado es `bundle_sha256` y sigue pendiente (PR-3). Ver la cabecera de
+    // build-info.mjs.
     deployment: deploymentInfo(env),
     model: env.AI_MODEL || "default-8b-fast",
     temperature: inferenceParams(env).temperature,

@@ -25,6 +25,13 @@
 // `-uno` un artefacto al que se le olvidara el .gitignore se volveria invisible
 // justo para la comprobacion que existe para atraparlo.
 //
+// LO QUE ESTO NO PUEDE VER, Y CONVIENE NO OLVIDARLO: los ficheros IGNORADOS. La
+// salida de `git status --porcelain` no los incluye —para eso haria falta
+// `--ignored`—, asi que un fichero que case con .gitignore puede aparecer,
+// cambiar o desaparecer y esta funcion seguira devolviendo `true`. No es un
+// descuido de `-uno`: es invisible con `-uno` y sin el. Por eso `tree_clean`
+// habla del estado de los ficheros RASTREADOS y no del artefacto desplegado.
+//
 // `null` cuando no hay salida de git que interpretar. No saber si el arbol estaba
 // limpio NO es lo mismo que saber que estaba sucio, y `false` seria afirmar lo
 // segundo.

@@ -2,7 +2,8 @@
 //
 // EL AGUJERO QUE ESTO CIERRA. Lo unico que un cliente podia citarnos era
 // `check_id`, y `check_id` solo existe si el motor llego a contestar
-// (engine.mjs:595). Justo las respuestas en las que alguien quiere reclamar —un
+// (lo asigna `closeOut`, en engine.mjs). Justo las respuestas en las que alguien
+// quiere reclamar —un
 // 402, un 409, un 500— no llevaban NADA: ni identificador en la cabecera, ni
 // identificador en el cuerpo, ni fila que buscar despues.
 //
@@ -718,8 +719,8 @@ test("PR-1f pagado MCP: el exito CONFIRMADO conserva las DOS claves de _meta", a
 // --- 3. El 402 de liquidacion fallida, que SI deja fila ---------------------
 
 test("PR-1 pagado: el 402 por liquidacion fallida deja fila y conserva el identificador", async () => {
-  // Es el unico 402 que deja rastro: el motor YA corrio (engine.mjs:591 escribio
-  // la fila) y solo despues fallo la liquidacion (cobro-x402.mjs:151-156), que
+  // Es el unico 402 que deja rastro: el motor YA corrio (`closeOut` en engine.mjs
+  // escribio la fila) y solo despues fallo la liquidacion (`cobrarConX402`), que
   // marca charged=0 y devuelve reto. Si la propagacion no llegara hasta aqui, la
   // reclamacion mas probable de todas —"pague y me disteis un 402"— seguiria sin
   // poder mirarse.
@@ -746,9 +747,9 @@ test("PR-1 pagado: el 402 por liquidacion fallida deja fila y conserva el identi
 test("PR-1 pagado: cobrarConX402 entrega __api_key Y __request_id a la vez", async () => {
   // No se puede espiar `runCheck` (import estatico), asi que se comprueba por sus
   // DOS huellas observables en la misma fila: `client_ref` solo puede existir si
-  // llego `__api_key` (answerlog.mjs:123 lo deriva del pagador) y `request_id`
+  // llego `__api_key` (`recordAnswer` lo deriva del pagador) y `request_id`
   // solo si llego `__request_id`. Las dos a la vez, en la misma fila, es la
-  // prueba de que el objeto de cobro-x402.mjs:139 lleva los dos.
+  // prueba de que el objeto que `cobrarConX402` le pasa a `runCheck` lleva los dos.
   const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
   const res = await conFacilitadorPago({}, () => pagoPorHttp(env));
   const requestId = res.headers.get(REQUEST_ID_HEADER);
@@ -842,7 +843,7 @@ test("PR-1h BARRERA: la huella de idempotencia NO cambia por el request_id", asy
 
 test("PR-1 BARRERA: la clave de cache NO cambia por el request_id", async () => {
   // Si entrara en la clave, cada peticion seria un fallo de cache y costaria una
-  // llamada al modelo. `cacheKey` enumera seis campos con nombre (text.mjs:7-16)
+  // llamada al modelo. `cacheKey` (text.mjs) enumera seis campos con nombre
   // y no recorre el objeto; esto lo deja fijado por prueba y no por lectura.
   const base = { ...PETICION_PAGO };
   assert.equal(
@@ -855,8 +856,8 @@ test("PR-1 BARRERA: la clave de cache NO cambia por el request_id", async () => 
 // --- 7. Los desenlaces que NO dejan fila ------------------------------------
 
 test("PR-1 pagado: el 409 no escribe answer_log y aun asi devuelve el identificador", async () => {
-  // El conflicto se detecta en cobro-x402.mjs:123, ANTES de verificar (:134) y
-  // ANTES del motor (:139): no hay fila que escribir, y por eso el identificador
+  // El conflicto se detecta en `cobrarConX402` ANTES de verificar el pago y ANTES
+  // del motor: no hay fila que escribir, y por eso el identificador
   // de la cabecera es lo unico que el cliente puede citarnos.
   const ID_PAGO = "pay_0123456789abcdef0123456789abcdef";
   const env = {
@@ -880,11 +881,11 @@ test("PR-1 pagado: el 409 no escribe answer_log y aun asi devuelve el identifica
 });
 
 test("PR-1 pagado: un error del motor no escribe answer_log y devuelve el identificador", async () => {
-  // El 500 de cobro-x402.mjs:142 y el error de motor de :141 salen por el MISMO
-  // `return` de index.mjs:906 y por el mismo sellado, asi que la propiedad es la
+  // El 500 y el error de motor de `cobrarConX402` salen por el MISMO `return` de
+  // `handleCheckX402` y por el mismo sellado, asi que la propiedad es la
   // misma para los dos. Se ejercita el alcanzable: un 500 SIN capturar no se
   // puede provocar de extremo a extremo porque todos los subsistemas del motor
-  // capturan (corpus.mjs:141, metrics.mjs:26 y :32, answerlog.mjs:170). El 500
+  // capturan: corpus.mjs, metrics.mjs y `recordAnswer` en answerlog.mjs. El 500
   // del catch del router ya lo cubre la prueba de mas arriba.
   const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
   const res = await conFacilitadorPago({}, () =>
@@ -900,14 +901,21 @@ test("PR-1 pagado: un error del motor no escribe answer_log y devuelve el identi
 
 // --- 8. El alcance no se ensancha -------------------------------------------
 
-test("PR-1 ALCANCE: payment_idempotency se escribe, pero SIN request_id", async () => {
-  // schema-006-trazabilidad.sql crea DOS columnas `request_id`: la de
-  // `answer_log`, que este PR puebla, y la de `payment_idempotency`, que se
-  // crea y se queda vacia. Esta prueba sujeta esa frontera por los dos lados, y
-  // mira la LISTA DE COLUMNAS del INSERT y no solo el valor: el ensanche se
-  // veria ahi aunque alguien enlazara un NULL.
+test("PR-1i ALCANCE: payment_idempotency se escribe, y NO nombra request_id", async () => {
+  // schema-006-trazabilidad.sql crea UNA sola columna `request_id`, la de
+  // `answer_log`. En `payment_idempotency` NO existe, asi que si `guardar`
+  // llegara a nombrarla en su INSERT, la escritura fallaria contra la base de
+  // verdad. Esta prueba mira la LISTA DE COLUMNAS del INSERT y no solo el valor:
+  // el ensanche se veria ahi aunque alguien enlazara un NULL.
   //
-  // Las dos mitades importan. Sin la primera, "no se puebla" pasaria tambien si
+  // Por que la columna no existe: una fila de `payment_idempotency` es un PAGO, y
+  // un mismo pago se sirve tantas veces como reintentos haya, cada uno con su
+  // `request_id`. Una columna escalar solo podria quedarse con uno —el primero o
+  // el ultimo— y afirmaria que ese pago tuvo UNA peticion cuando tuvo varias. La
+  // correlacion de los reintentos la da la bitacora, que deja una linea por
+  // intento; hay prueba de eso en test/bitacora.test.mjs.
+  //
+  // Las dos mitades importan. Sin la primera, "no se nombra" pasaria tambien si
   // la fila no llegara a escribirse, y entonces la prueba no vigilaria nada.
   const ID_PAGO = "pay_fedcba9876543210fedcba9876543210";
   const env = { ...ENV_PAGO, DB: dbPago(), AI: iaPago("YES") };
@@ -921,12 +929,12 @@ test("PR-1 ALCANCE: payment_idempotency se escribe, pero SIN request_id", async 
   assert.ok(env.DB._idem[0].fingerprint, "con su huella");
   assert.equal(env.DB._idem[0].http_status, 200);
 
-  // 2. Y NO lleva request_id: ni la columna en el INSERT, ni valor.
+  // 2. Y NO nombra request_id: esa columna no existe en la tabla.
   assert.equal(env.DB._idem[0].__columnas.includes("request_id"), false,
-    "payment_idempotency NO escribe request_id en este PR");
+    "payment_idempotency NO puede nombrar una columna que schema-006 no crea");
   assert.equal(env.DB._idem[0].request_id, undefined);
 
-  // 3. La que SI se puebla sigue poblandose, para que esto no pase por vacio.
+  // 3. La que SI existe sigue poblandose, para que esto no pase por vacio.
   assert.equal(env.DB._resp.length, 1);
   assert.equal(env.DB._resp[0].__columnas.includes("request_id"), true);
   assert.equal(env.DB._resp[0].request_id, res.headers.get(REQUEST_ID_HEADER));

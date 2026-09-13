@@ -11,11 +11,16 @@
 //
 // PR-1c — IDENTIDAD DE DESPLIEGUE. EL LECTOR.
 //
-// QUE PREGUNTA CONTESTA. "El servicio que me acaba de responder, ¿que codigo
-// exacto era?". Hasta hoy la respuesta era una cadena escrita a mano que podia
-// llevar dias sin actualizarse, y de hecho los llevaba: el commit de W57
-// (9a6d4e7) no la toco, y durante seis dias este servicio anuncio un build que
-// no era el suyo. Sin forma de saberlo desde fuera.
+// QUE PREGUNTA CONTESTA, Y CUAL NO. Contesta "¿que version esta atendiendo, y de
+// que commit salio?". Hasta hoy la respuesta era una cadena escrita a mano que
+// podia llevar dias sin actualizarse: el commit de W57 (9a6d4e7) toco codigo y
+// NO la actualizo, de modo que se quedo anunciando W56. W57 no llego a
+// desplegarse, asi que ese desajuste no llego a servirse — pero el mecanismo no
+// lo impedia, y desde fuera no habria habido forma de saberlo.
+//
+// LO QUE NO CONTESTA es "¿que bytes exactos se desplegaron?". Ver el alcance de
+// `tree_clean` mas abajo: para eso hace falta la huella del artefacto, que es
+// `bundle_sha256` y queda para PR-3.
 //
 // LOS CINCO CAMPOS, Y DE DONDE SALE CADA UNO:
 //   version_id  — del binding CF_VERSION_METADATA, en tiempo de EJECUCION. Es lo
@@ -26,6 +31,24 @@
 //   tree_clean  — de `git status --porcelain`, en tiempo de generacion.
 //   built_at    — el instante de la generacion.
 //   build       — DERIVADO de los dos primeros. Deja de escribirse a mano.
+//
+// EL ALCANCE DE `commit` + `tree_clean`, DICHO ENTERO PORQUE ES MENOS DE LO QUE
+// PARECE. Los dos juntos describen EL ESTADO DE LOS FICHEROS RASTREADOS POR GIT
+// en el momento de generar el sello. No identifican el artefacto desplegado, y
+// hay una razon concreta: `git status --porcelain`, sin `--ignored`, NO LISTA LOS
+// FICHEROS IGNORADOS. Cualquier cosa que case con .gitignore puede aparecer,
+// cambiar o desaparecer y `tree_clean` seguira diciendo `true`.
+//
+// El caso que mas conviene tener presente es el de este mismo mecanismo:
+// `src/build-info.generated.mjs` esta ignorado a proposito —si se versionara,
+// generarlo ensuciaria el arbol y `tree_clean` se desmentiria en el acto de
+// medirse— y vive DENTRO de `src/`, o sea dentro de lo que wrangler empaqueta.
+// Es un fichero del artefacto que esta comprobacion no puede ver.
+//
+// Lo que SI identifica la version concreta que atiende es `version_id`, que viene
+// del binding de Cloudflare y no de aqui. Y la huella del artefacto en si es
+// `bundle_sha256`, que sigue aplazado a PR-3. Hay una prueba en
+// test/despliegue.test.mjs que deja este limite por escrito y ejecutable.
 //
 // LA FORMA ESTA CONGELADA. Estos cinco campos, con estos nombres y en este
 // orden. Si algun dia entra `bundle_sha256` (PR-3), se anade; los cinco no
@@ -40,10 +63,16 @@
 // resuelve donde de verdad se resuelve —generandolo siempre, en los cuatro
 // caminos— y asi no queda nada que pueda no arrancar.
 //
-// EL PRECIO, ASUMIDO: sin sello esto no carga, en vez de degradar a
-// "desconocido". Es lo correcto. Fallar ruidosamente al construir es mejor que
-// servir un manifiesto que dice `"build": "unknown"` como si fuera un estado
-// normal — que es justo la clase de mentira comoda que PR-1c viene a eliminar.
+// EL PRECIO, ASUMIDO: SIN EL FICHERO GENERADO ESTE MODULO NO CARGA, y el Worker
+// no arranca. NO degrada a "desconocido": el import es estatico, asi que el
+// modulo no llega a evaluarse. Es lo correcto — fallar ruidosamente al construir
+// es mejor que servir un manifiesto que dice `"build": "unknown"` como si fuera
+// un estado normal.
+//
+// Y `"unknown"` SI es un valor real, pero de OTRO caso, que no hay que confundir
+// con este: el sello existe y sus campos son nulos, que es lo que pasa al
+// generarlo fuera de un repositorio git. Ahi `derivarBuild` devuelve "unknown"
+// porque no hay nada de donde derivar.
 // Por eso el aviso de arriba del todo: es lo primero que se lee al abrir el
 // fichero que el error de Node senala.
 // ---------------------------------------------------------------------------

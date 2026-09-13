@@ -1,10 +1,12 @@
-// PR-1c — IDENTIDAD DE DESPLIEGUE: QUE EL SERVICIO NO PUEDA MENTIR SOBRE SI MISMO.
+// PR-1c — IDENTIDAD DE DESPLIEGUE: QUE EL SERVICIO DIGA DE DONDE SALE.
 //
 // EL AGUJERO QUE ESTO CIERRA. La version del codigo era una cadena literal en
 // `util.mjs`. Una cadena literal solo dice la verdad si alguien se acuerda de
-// cambiarla, y no se acordo: el commit de W57 (9a6d4e7) no la toco, asi que
-// durante seis dias `/discovery.json` anuncio un build que no era el suyo. Y no
-// habia forma de saberlo desde fuera.
+// cambiarla, y no se acordo: el commit de W57 (9a6d4e7) toco codigo y no la
+// actualizo, de modo que se quedo anunciando W56. W57 no llego a desplegarse, asi
+// que ese desajuste no llego a servirse por `/discovery.json`; lo que quedo
+// demostrado es que el mecanismo no lo habria impedido y que desde fuera no
+// habria habido forma de saberlo.
 //
 // LO QUE VIGILAN ESTAS PRUEBAS, en este orden:
 //   1. que las dos rutas publicas sirvan los CINCO campos, con esta forma exacta;
@@ -13,6 +15,9 @@
 //      `tree_clean` no se desmienta a si mismo;
 //   4. que cuando no hay git —un tarball, un repositorio sin commits— los campos
 //      salgan como DESCONOCIDOS, nunca como falsos ni como algo plausible;
+//   4bis. y EL LIMITE CONOCIDO de `tree_clean`: que un fichero IGNORADO puede
+//      convivir con `tree_clean: true`. No es una garantia, es una frontera, y se
+//      deja por escrito y ejecutable para que no se lea de mas;
 //   5. que el sello se genere SIEMPRE. El lector lo importa de forma estatica, a
 //      cambio de que no quede ningun `await` de nivel superior que pueda no
 //      arrancar en workerd; el precio es que sin sello no carga, y quien lo evita
@@ -24,7 +29,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, appendFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, appendFileSync, readFileSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -251,6 +256,96 @@ test("PR-1c: el generador lee git de verdad, y ve un fichero rastreado modificad
   const sucio = await leerSello(dir);
   assert.equal(sucio.tree_clean, false, "el arbol esta sucio y el sello lo dice");
   assert.equal(sucio.commit, limpio.commit, "el commit no ha cambiado: son cosas distintas");
+});
+
+test("PR-1i LIMITE CONOCIDO: un fichero IGNORADO convive con tree_clean: true", async (t) => {
+  // ESTO NO ES UNA GARANTIA, ES UNA FRONTERA, y se deja ejecutable porque una
+  // limitacion escrita solo en un comentario se pierde en la siguiente lectura.
+  //
+  // `git status --porcelain`, sin `--ignored`, NO lista los ficheros ignorados.
+  // Asi que `tree_clean` describe el estado de los ficheros RASTREADOS en el
+  // momento de generar el sello, y no el artefacto: cualquier cosa que case con
+  // .gitignore puede aparecer, cambiar o desaparecer sin que se entere.
+  //
+  // El caso que mas importa es el de este mismo mecanismo: el sello vive en
+  // `src/build-info.generated.mjs`, esta ignorado a proposito, y `src/` es lo que
+  // wrangler empaqueta. Es un fichero del artefacto que esta comprobacion no
+  // puede ver. La huella del artefacto es `bundle_sha256` y sigue en PR-3.
+  if (!hayGit()) return t.skip("sin git en esta maquina: se salta, no se da por buena");
+
+  const dir = mkdtempSync(join(tmpdir(), "rc-ignorado-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  try {
+    git(["rev-parse", "--show-toplevel"], dir);
+    return t.skip("el directorio temporal cuelga de un repositorio: no se puede probar aqui");
+  } catch { /* bien */ }
+
+  git(["init", "-q"], dir);
+  mkdirSync(join(dir, "src"), { recursive: true });
+  writeFileSync(join(dir, "src", "cosa.mjs"), "export const x = 1;\n");
+  writeFileSync(join(dir, ".gitignore"), "src/build-info.generated.mjs\nbasura.txt\n");
+  git(["add", "."], dir);
+  git(["-c", "user.email=p@ejemplo", "-c", "user.name=Pruebas", "-c", "commit.gpgsign=false",
+       "commit", "-q", "-m", "inicial"], dir);
+
+  // (a) Arbol limpio de verdad: el control, para que (b) no pase por vacio.
+  generar(dir);
+  assert.equal((await leerSello(dir)).tree_clean, true, "de partida, limpio");
+
+  // (b) Aparece un fichero IGNORADO. El arbol ya NO es el mismo...
+  writeFileSync(join(dir, "basura.txt"), "esto no lo ve tree_clean\n");
+  generar(dir);
+  assert.equal((await leerSello(dir)).tree_clean, true,
+    "...y sin embargo `tree_clean` sigue diciendo true: los ignorados no se ven");
+
+  // (c) Y la demostracion del mecanismo, para que no quede como una rareza: git
+  //     SI lo ve cuando se le pide con --ignored. Lo que no lo ve es la medida
+  //     que usa el generador.
+  assert.equal(git(["status", "--porcelain"], dir).includes("basura.txt"), false,
+    "la medida que usamos no lo lista");
+  assert.equal(git(["status", "--porcelain", "--ignored"], dir).includes("basura.txt"), true,
+    "pero el fichero esta ahi: no es que no exista, es que esa medida no lo mira");
+
+  // (d) Un fichero RASTREADO modificado si lo ve, para que (b) no se confunda con
+  //     "tree_clean no detecta nada".
+  appendFileSync(join(dir, "src", "cosa.mjs"), "export const y = 2;\n");
+  generar(dir);
+  assert.equal((await leerSello(dir)).tree_clean, false, "lo rastreado si lo detecta");
+});
+
+test("PR-1i: los comentarios no afirman lo que no se puede demostrar", () => {
+  // Una rejilla sobre el codigo y las pruebas. Las frases retiradas en PR-1i
+  // decian cosas que el repositorio no sostiene: que W57 estuvo desplegado
+  // durante un numero de dias, que el sello identifica el "codigo exacto", y que
+  // el servicio no puede mentir sobre si mismo. Si alguien las reescribe, esto se
+  // pone rojo.
+  //
+  // Los patrones van como expresiones regulares CONSTRUIDAS, no como las frases
+  // literales: si estuvieran literales aqui, esta prueba se encontraria a si
+  // misma y no probaria nada.
+  const prohibidos = [
+    [new RegExp("seis\\s+d[ií]as", "i"),                    "una duracion de despliegue que no se midio"],
+    [new RegExp("anunci[oó]\\s+un\\s+build\\s+que\\s+no\\s+era", "i"), "que se llego a servir un build ajeno"],
+    [new RegExp("c[oó]digo\\s+exacto", "i"),                "que el sello identifica el codigo exacto"],
+    [new RegExp("no\\s+pueda?\\s+mentir", "i"),             "que el servicio no puede mentir"],
+  ];
+  const ficheros = [
+    ...readdirSync(join(RAIZ, "src")).map((f) => join("src", f)),
+    ...readdirSync(join(RAIZ, "tools")).map((f) => join("tools", f)),
+    ...readdirSync(join(RAIZ, "test")).map((f) => join("test", f)),
+    "schema-006-trazabilidad.sql",
+  ].filter((f) => /\.(mjs|sql)$/.test(f) && !f.endsWith("despliegue.test.mjs"));
+
+  assert.ok(ficheros.length > 30, "la rejilla mira de verdad un monton de ficheros");
+  for (const rel of ficheros) {
+    const texto = readFileSync(join(RAIZ, rel), "utf-8");
+    for (const [re, que] of prohibidos)
+      assert.equal(re.test(texto), false, `${rel} vuelve a afirmar ${que}`);
+  }
+
+  // El control: la rejilla SI encuentra lo que busca cuando esta.
+  assert.equal(prohibidos[0][0].test("y durante seis dias anduvo asi"), true,
+    "si esto fallara, la rejilla de arriba estaria pasando por vacio");
 });
 
 test("PR-1c: el generador no ensucia el arbol de ESTE repositorio", () => {

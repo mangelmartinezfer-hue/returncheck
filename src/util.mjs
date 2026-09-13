@@ -7,11 +7,21 @@
 // arreglamos en este otro".
 //
 // PR-1c — Y AHORA YA NO SE ESCRIBE A MANO. Aquí había una cadena literal, y una
-// cadena literal solo dice la verdad si alguien se acuerda de cambiarla: el
-// commit de W57 (9a6d4e7) no la cambió, y durante seis días este servicio
-// anunció un build que no era el suyo. Se deriva del commit y de su fecha
-// (`src/build-info.mjs`), y quien no genere el sello obtiene "unknown", que es
-// la verdad. Se reexporta desde aquí para no mover a sus cuatro consumidores.
+// cadena literal solo dice la verdad si alguien se acuerda de cambiarla. No se
+// acordó: el commit de W57 (9a6d4e7) tocó código y NO actualizó esta constante,
+// que se quedó anunciando W56. W57 no llegó a desplegarse, así que ese desajuste
+// no llegó a servirse — pero de haberse desplegado, el servicio habría anunciado
+// un build que no era el suyo, y desde fuera no habría forma de saberlo. El
+// mecanismo no lo impedía; que no ocurriera fue suerte.
+//
+// Ahora se deriva del commit y de su fecha (ver `derivarBuild` en
+// build-reglas.mjs). Se reexporta desde aquí para no mover a sus consumidores.
+//
+// SIN EL FICHERO GENERADO ESTO NO CARGA. `build-info.mjs` importa el sello de
+// forma ESTÁTICA, así que si falta, el módulo no llega a evaluarse y el Worker no
+// arranca — no degrada a "unknown". `"unknown"` es otra cosa: es lo que sale
+// cuando el sello SÍ existe pero sus campos son nulos, que es el caso de haberlo
+// generado fuera de un repositorio git. Ver la cabecera de build-info.mjs.
 export { BUILD } from "./build-info.mjs";
 
 export function nowISO() {
@@ -40,15 +50,20 @@ export function errorResponse(code, message, httpStatus, details) {
 // PR-1 — EL IDENTIFICADOR DE PETICIÓN.
 //
 // PARA QUÉ SIRVE, que no es lo mismo que `check_id`. `check_id` identifica una
-// RESPUESTA del motor y solo existe si el motor llegó a contestar
-// (engine.mjs:595). Cuando algo se cae —un 402, un 409, un 500— no hay
-// `check_id` que citar, y hasta hoy el cliente se quedaba sin NADA con lo que
-// volver a nosotros. `request_id` existe SIEMPRE, desde la primera línea del
-// router, y por eso es el que se puede pedir en una reclamación.
+// RESPUESTA del motor y solo existe si el motor llegó a contestar: lo asigna
+// `closeOut` en engine.mjs, al final del todo. Cuando algo se cae —un 402, un
+// 409, un 500— no hay `check_id` que citar, y hasta hoy el cliente se quedaba sin
+// NADA con lo que volver a nosotros. `request_id` existe SIEMPRE, desde la
+// primera línea del router, y por eso es el que se puede pedir en una
+// reclamación.
 //
 // EL PREFIJO NO ES DECORACIÓN: `rc_req_` es lo que hace que un identificador
-// pegado por un tercero en un correo se pueda encontrar con un `grep` sobre los
-// registros sin sacar además todos los UUID del mundo.
+// pegado por un tercero en un correo se pueda buscar sin sacar además todos los
+// UUID del mundo. DÓNDE se busca: en la columna `answer_log.request_id` cuando el
+// motor llegó a contestar, y en la línea que emite `registrarIntento`
+// (bitacora.mjs) en los demás casos. Que esas líneas se conserven y se puedan
+// consultar en Cloudflare NO está demostrado todavía: eso es validación posterior
+// al despliegue, y hasta hacerla no se afirma.
 // ---------------------------------------------------------------------------
 
 const REQUEST_ID_PREFIJO = "rc_req_";
@@ -82,7 +97,7 @@ export const REQUEST_ID_HEADER = "X-ReturnCheck-Request-Id";
  * OJO CON `error`, QUE SIGNIFICA DOS COSAS DISTINTAS EN ESTE SERVICIO:
  *
  *   · `{ error: { code, message } }`      el contrato de error (util.mjs)
- *   · `{ x402Version, error: "texto", …}` el reto de pago (x402.mjs:149-158)
+ *   · `{ x402Version, error: "texto", …}` el reto de pago (`retoDePago`, x402.mjs)
  *
  * En el primero el identificador va DENTRO de `error`, que es donde el cliente
  * lo va a buscar. En el segundo `error` es una cadena y meterle un campo dentro

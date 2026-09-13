@@ -1,53 +1,83 @@
 -- PR-1 — EL IDENTIFICADOR DE PETICION EN LAS FILAS.
 --
 -- Se aplica SOBRE una base que ya tiene schema.sql, 002, 003 y 004.
--- Se ejecuta UNA sola vez y ANTES de desplegar el codigo que escribe aqui:
---   npx wrangler d1 execute returncheck --remote --file=schema-006-trazabilidad.sql
 --
--- NO DEPENDE DE schema-005. Esta migracion solo toca tablas creadas por
--- schema-003 (`answer_log`) y schema-004 (`payment_idempotency`). Se puede
--- aplicar sobre una base que nunca haya visto schema-005, y ese es justamente el
--- motivo por el que esta escrita asi: `ALTER TABLE` no admite `IF NOT EXISTS`,
--- de modo que nombrar aqui una tabla que quiza no exista convertiria un PR de
--- trazabilidad en un PR que falla en duro contra produccion.
+-- ES UNA BARRERA OBLIGATORIA PREVIA AL DESPLIEGUE, no un paso de limpieza que se
+-- pueda dejar para despues. Si el codigo llega a produccion sin esta columna, el
+-- INSERT de `recordAnswer` falla, `recordAnswer` se traga el error (su `catch`
+-- devuelve null a proposito, para que el registro nunca rompa una consulta), el
+-- servicio responde 200, la respuesta sale SIN `check_id` y —esto es lo peor— el
+-- cobro deja de anotarse en ninguna fila, porque `markAnswerCharged` no tiene id
+-- al que apuntar. O sea: se cobra, se contesta bien y no queda rastro. Un fallo
+-- silencioso, que es la clase de fallo que se descubre cuando ya hay que
+-- responder de el.
+--
+-- LA SECUENCIA, Y EN ESTE ORDEN:
+--
+--   1. Comprobar que el remoto no ha avanzado.
+--   2. Aplicar esta migracion, con autorizacion expresa:
+--        npx wrangler d1 execute returncheck --remote --file=schema-006-trazabilidad.sql
+--   3. Verificar la columna:
+--        PRAGMA table_info(answer_log);        -> `request_id` TEXT tiene que estar
+--   4. Verificar el indice:
+--        SELECT name FROM sqlite_master WHERE type='index' AND name='idx_answer_request';
+--   5. Solo entonces, empujar o fusionar segun la autorizacion concreta.
+--
+-- Si el paso 3 o el 4 no dan lo que se espera, se para. No se despliega.
+--
+-- NO DEPENDE DE schema-005. Esta migracion solo toca una tabla creada por
+-- schema-003 (`answer_log`). Se puede aplicar sobre una base que nunca haya visto
+-- schema-005, y ese es justamente el motivo por el que esta escrita asi: `ALTER
+-- TABLE` no admite `IF NOT EXISTS`, de modo que nombrar aqui una tabla que quiza
+-- no exista convertiria un PR de trazabilidad en un PR que falla en duro contra
+-- produccion.
 --
 -- EL AGUJERO QUE CIERRA. Hasta hoy, lo unico que un cliente podia citarnos era
--- `check_id`, y `check_id` SOLO existe si el motor llego a contestar
--- (engine.mjs:595). Cuando algo se cae —un 402, un 409, un 500— no habia nada:
--- ni en la respuesta ni en las filas. Una reclamacion del tipo "vuestra API me
--- dio un 500 el martes" no se podia mirar, porque no habia por donde entrar.
+-- `check_id`, y `check_id` SOLO existe si el motor llego a contestar — lo asigna
+-- `closeOut` en engine.mjs, al final del todo. Cuando algo se cae —un 402, un
+-- 409, un 500— no habia nada: ni en la respuesta ni en las filas. Una reclamacion
+-- del tipo "vuestra API me dio un 500 el martes" no se podia mirar, porque no
+-- habia por donde entrar.
 --
 -- `request_id` (rc_req_<uuid>) existe SIEMPRE, se genera en la primera linea del
 -- router y viaja en la cabecera X-ReturnCheck-Request-Id de toda respuesta. Esta
--- columna es lo que lo convierte en algo que se puede buscar despues.
+-- columna es lo que lo convierte en algo que se puede buscar despues, para las
+-- respuestas que SI dejan fila; para las que no, lo que queda es la linea de
+-- bitacora que emite `registrarIntento` (bitacora.mjs).
 --
 -- ADITIVA Y NULLABLE, Y ESO NO ES PEREZA:
 --
 --   · Aditiva: no se toca ninguna clave primaria ni ninguna columna existente.
---     Las garantias que ya daban las dos tablas se quedan intactas.
+--     Las garantias que ya daba la tabla se quedan intactas.
 --   · Nullable: las filas que ya existen no tienen identificador de peticion y
 --     nunca lo van a tener. Inventarles uno seria fabricar trazabilidad que no
 --     existio, que es exactamente lo contrario de para lo que sirve esta
 --     columna. NULL aqui significa "no lo se", igual que `charged IS NULL`
 --     significa "no sabemos si se cobro" desde W41.
 --
--- LO QUE ESTA MIGRACION HABILITA Y LO QUE TODAVIA NO SE ESCRIBE. En PR-1 solo
--- `answer_log` recibe valor. La columna de `payment_idempotency` queda creada y
--- vacia: la escribiria `guardar` (idempotencia.mjs:147), que no se toca en este
--- PR. Se crea ahora, en la misma migracion, a proposito: una migracion aditiva
--- sobre D1 es una operacion que hay que programar y ejecutar contra produccion,
--- y partirla en dos visitas por dos PR distintos duplica las ocasiones de que
--- una se quede sin aplicar y el codigo salga escribiendo en una columna que no
--- existe. La columna vacia no hace dano; la columna que falta el dia del
--- despliegue, si.
+-- ALCANCE REDUCIDO: SOLO `answer_log`. Una version anterior de esta migracion
+-- creaba tambien `payment_idempotency.request_id` y su indice. Se han retirado, y
+-- no por prudencia generica: UNA SOLA COLUMNA NO PUEDE REPRESENTAR LO QUE HABRIA
+-- QUE GUARDAR AHI. Una fila de `payment_idempotency` es un PAGO, y un mismo pago
+-- puede servirse muchas veces —cada reintento es un intento nuevo, con su propio
+-- `request_id`—, asi que una columna escalar solo podria quedarse con uno de
+-- ellos: el primero, o el ultimo, y en los dos casos estariamos afirmando que un
+-- pago tuvo UNA peticion cuando tuvo varias. Eso no es trazabilidad incompleta,
+-- es trazabilidad equivocada.
+--
+-- La correlacion de los reintentos la da hoy la bitacora, que deja una linea por
+-- intento, con su `request_id` y `replay: true`: N reintentos, N lineas. Si PR-2
+-- necesita ademas una relacion en la base, la diseñara entonces y con la
+-- cardinalidad correcta —una tabla de intentos, no una columna—, y solo si de
+-- verdad le hace falta. Crear hoy una columna vacia "por si acaso" habria dejado
+-- en el esquema una forma que ya sabemos que es la equivocada.
 --
 -- LA TRAZABILIDAD DE `settlement_log` QUEDA APLAZADA A PR-2. No se nombra esa
 -- tabla en ninguna sentencia de este fichero.
 
-ALTER TABLE answer_log          ADD COLUMN request_id TEXT;
-ALTER TABLE payment_idempotency ADD COLUMN request_id TEXT;
+ALTER TABLE answer_log ADD COLUMN request_id TEXT;
 
 -- Entrar por el identificador que cita el cliente. Es LA consulta de esta
 -- columna: alguien pega un rc_req_... en un correo y hay que encontrar la fila.
-CREATE INDEX IF NOT EXISTS idx_answer_request      ON answer_log(request_id);
-CREATE INDEX IF NOT EXISTS idx_idem_request        ON payment_idempotency(request_id);
+-- Sin el indice, esa consulta es un barrido completo de la tabla.
+CREATE INDEX IF NOT EXISTS idx_answer_request ON answer_log(request_id);
