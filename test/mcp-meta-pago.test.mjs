@@ -51,10 +51,18 @@ function ia(verdict) {
   }) }) };
 }
 
+// PR-2 — este doble tuvo que cambiar, y conviene decir por que. Antes devolvia
+// `changes: 0` a todo, y daba igual: el codigo de cobro no miraba ese numero.
+// Ahora la PUERTA decide con el, y un cero significa «otro reclamo primero este
+// identificador». Sobre una base vacia eso es falso, asi que el doble tiene que
+// decir la verdad: la reclamacion entra, changes 1. Si hay `idemFila`, la fila
+// ya existe y entonces el cero SI es correcto.
 function db({ idemFila = null } = {}) {
   const g = { run: async () => ({ meta: { changes: 0 } }), first: async () => null, all: async () => ({ results: [] }) };
   return { prepare: (sql) => ({
-    bind: () => ({ ...g, first: async () => (idemFila && /FROM payment_idempotency/.test(sql)) ? idemFila : null }),
+    bind: () => ({ ...g,
+      run: async () => ({ meta: { changes: (/INTO payment_idempotency/.test(sql) && !idemFila) ? 1 : 0 } }),
+      first: async () => (idemFila && /FROM payment_idempotency/.test(sql)) ? idemFila : null }),
     ...g }) };
 }
 

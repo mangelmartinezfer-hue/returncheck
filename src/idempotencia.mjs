@@ -110,16 +110,19 @@ function masHoras(iso, horas) {
  *   null                          -> no lo hemos visto (o caducó): procesar normal
  *   { repetido: true, ... }       -> misma huella: devolver lo guardado sin cobrar
  *   { conflicto: true }           -> mismo id, otra petición: 409
+ *   { enCurso: true, ... }        -> PR-2: otra petición lo reclamó y sigue trabajando
  *
  * Nunca lanza. Si la base falla, se devuelve null y la consulta sigue su curso:
  * perder la protección de idempotencia es malo, pero tumbar una consulta que el
- * cliente está pagando es peor.
+ * cliente está pagando es peor. (OJO: esa política vale para esta lectura, que es
+ * informativa. La PUERTA de `reclamar` falla cerrado, y ahí el motivo es el
+ * contrario: sin puerta no se puede impedir el cobro doble.)
  */
 export async function consultar(env, id, huellaActual, ahora = nowISO()) {
   try {
     if (!env || !env.DB || !id) return null;
     const fila = await env.DB
-      .prepare("SELECT payment_id, fingerprint, response_json, http_status, transaction_hash, expires_at FROM payment_idempotency WHERE payment_id = ?")
+      .prepare("SELECT payment_id, fingerprint, response_json, http_status, transaction_hash, expires_at, status, claimed_at FROM payment_idempotency WHERE payment_id = ?")
       .bind(id).first();
     if (!fila) return null;
 
@@ -127,6 +130,11 @@ export async function consultar(env, id, huellaActual, ahora = nowISO()) {
     if (fila.expires_at && fila.expires_at <= ahora) return null;
 
     if (fila.fingerprint !== huellaActual) return { conflicto: true };
+
+    // Una fila escrita antes de PR-2 no tiene `status`. Es una respuesta ya
+    // servida, o sea 'done'. No se le inventa otro significado.
+    if (fila.status === "in_flight")
+      return { enCurso: true, reclamadoEn: fila.claimed_at || null };
 
     return {
       repetido: true,
@@ -158,6 +166,136 @@ export async function guardar(env, { id, huella: h, cuerpo, estado = 200, transa
       masHoras(ahora, env.IDEMPOTENCY_HOURS)
     ).run();
     return true;
+  } catch (_) { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// PR-2 — LA PUERTA. BLQ-X402-GATE-01.
+//
+// `guardar` de aquí arriba NO es una puerta y nunca lo fue: un `INSERT OR
+// REPLACE` siempre tiene éxito, así que jamás devuelve el cero que distingue al
+// perdedor de una carrera. Y estaba DESPUÉS de /settle, con lo cual dos
+// peticiones con el mismo identificador liquidaban las dos.
+//
+// Lo que sigue lo cierra. Una sola regla, y conviene leerla despacio:
+//
+//   EL PERMISO LO DA EL MOTOR, NO NOSOTROS.
+//
+// El número de filas afectadas que devuelve D1 es el único permiso válido. Un
+// `catch` que ponga un cero a mano está fabricando un permiso que nadie le dio:
+// una excepción significa «no sé si entró», y «no sé» no es «no entró». Por eso
+// un fallo aquí devuelve `indeterminado` y el cobro se detiene, en lugar de
+// seguir y arriesgarse a liquidar dos veces.
+// ---------------------------------------------------------------------------
+
+// Cuánto se espera antes de dar por muerta una reclamación colgada. Tiene que
+// ser MAYOR que el plazo de /settle: si no, se podría adelantar a una petición
+// que todavía está liquidando, que es justo lo que venimos a impedir.
+const VENTANA_RECLAMACION_MS = 120000;
+
+function restarMs(iso, ms) {
+  return new Date(new Date(iso).getTime() - Number(ms)).toISOString();
+}
+
+/**
+ * Reclama el identificador ANTES de verificar, de gastar el motor y de liquidar.
+ *
+ * Devuelve exactamente uno de:
+ *   { dueno: true }            -> la fila es nuestra. Solo aquí se puede liquidar.
+ *   { repetido: true, ... }    -> ya había respuesta guardada: se devuelve tal cual.
+ *   { conflicto: true }        -> mismo identificador, otra pregunta: 409.
+ *   { enCurso: true }          -> otro la tiene y sigue viva: que reintente luego.
+ *   { indeterminado: true }    -> no se pudo establecer la puerta. NO se liquida.
+ */
+export async function reclamar(env, { id, huella: h, ventanaMs = null } = {}, ahora = nowISO()) {
+  if (!env || !env.DB || !id || !h) return { indeterminado: true, motivo: "sin_base_o_sin_id" };
+
+  const caduca = masHoras(ahora, env.IDEMPOTENCY_HOURS);
+  let res;
+  try {
+    res = await env.DB.prepare(
+      `INSERT INTO payment_idempotency
+         (payment_id, fingerprint, response_json, http_status, transaction_hash, created_at, expires_at, status, claimed_at)
+       VALUES (?,?,'',0,NULL,?,?,'in_flight',?)
+       ON CONFLICT (payment_id) DO NOTHING`
+    ).bind(id, h, ahora, caduca, ahora).run();
+  } catch (e) {
+    return { indeterminado: true, motivo: String((e && e.message) || e) };
+  }
+
+  const cambios = Number(res && res.meta && res.meta.changes);
+  if (cambios === 1) return { dueno: true };
+  if (!Number.isFinite(cambios)) return { indeterminado: true, motivo: "changes_no_obtenido" };
+
+  // cambios === 0, dicho por el motor: la fila ya existía. Hay que mirar cuál es.
+  const previo = await consultar(env, id, h, ahora);
+
+  if (previo && previo.conflicto) return { conflicto: true };
+  if (previo && previo.repetido) return previo;
+
+  if (previo && previo.enCurso) {
+    // Otra petición la tiene. Solo se le quita si lleva colgada más que la
+    // ventana, y solo con la MISMA huella: adelantarse a una liquidación viva
+    // sería exactamente el fallo que PR-2 viene a cerrar.
+    const limite = restarMs(ahora, ventanaMs == null ? (Number(env.IDEMPOTENCY_CLAIM_MS) || VENTANA_RECLAMACION_MS) : ventanaMs);
+    if (!previo.reclamadoEn || previo.reclamadoEn > limite) return { enCurso: true };
+    try {
+      const t = await env.DB.prepare(
+        `UPDATE payment_idempotency SET claimed_at = ?
+           WHERE payment_id = ? AND fingerprint = ? AND status = 'in_flight' AND claimed_at <= ?`
+      ).bind(ahora, id, h, limite).run();
+      return Number(t && t.meta && t.meta.changes) === 1 ? { dueno: true } : { enCurso: true };
+    } catch (e) {
+      return { indeterminado: true, motivo: String((e && e.message) || e) };
+    }
+  }
+
+  // `consultar` devolvió null con la fila existiendo: está caducada. La
+  // especificación dice procesarla como nueva, así que se toma — pero con la
+  // condición de caducidad dentro del UPDATE, para que la decida el motor.
+  try {
+    const t = await env.DB.prepare(
+      `UPDATE payment_idempotency
+         SET fingerprint = ?, response_json = '', http_status = 0, transaction_hash = NULL,
+             created_at = ?, expires_at = ?, status = 'in_flight', claimed_at = ?
+       WHERE payment_id = ? AND expires_at <= ?`
+    ).bind(h, ahora, caduca, ahora, id, ahora).run();
+    return Number(t && t.meta && t.meta.changes) === 1 ? { dueno: true } : { indeterminado: true, motivo: "fila_ilegible" };
+  } catch (e) {
+    return { indeterminado: true, motivo: String((e && e.message) || e) };
+  }
+}
+
+/**
+ * Suelta una reclamación NUESTRA. Solo se llama cuando consta que no se movió
+ * dinero: verificación fallida, error del motor, o una liquidación que ni
+ * siquiera llegó a salir. Si hay la menor duda de que el facilitador pudo
+ * ejecutar la transferencia, la reclamación se queda donde está.
+ */
+export async function liberar(env, id) {
+  try {
+    if (!env || !env.DB || !id) return false;
+    const r = await env.DB
+      .prepare("DELETE FROM payment_idempotency WHERE payment_id = ? AND status = 'in_flight'")
+      .bind(id).run();
+    return Number(r && r.meta && r.meta.changes) === 1;
+  } catch (_) { return false; }
+}
+
+/** Cierra la reclamación con la respuesta ya servida. Solo toca la fila si sigue siendo nuestra. */
+export async function finalizar(env, { id, cuerpo, estado = 200, transaccion = null }, ahora = nowISO()) {
+  try {
+    if (!env || !env.DB || !id) return false;
+    const r = await env.DB.prepare(
+      `UPDATE payment_idempotency
+         SET response_json = ?, http_status = ?, transaction_hash = ?, status = 'done',
+             created_at = ?, expires_at = ?
+       WHERE payment_id = ? AND status = 'in_flight'`
+    ).bind(
+      typeof cuerpo === "string" ? cuerpo : JSON.stringify(cuerpo),
+      estado, transaccion, ahora, masHoras(ahora, env.IDEMPOTENCY_HOURS), id
+    ).run();
+    return Number(r && r.meta && r.meta.changes) === 1;
   } catch (_) { return false; }
 }
 

@@ -882,6 +882,13 @@ async function handleCheckX402(request, env) {
     return errorResponse("CONFLICT",
       "This payment identifier was already used for a different request.", 409);
 
+  // PR-2. Otra peticion con el MISMO identificador y la MISMA pregunta esta
+  // dentro ahora mismo. No es un conflicto —la pregunta es la suya— y decirle
+  // que lo es seria mentirle. Que reintente: no se le cobrara dos veces.
+  if (r.tipo === "en_curso")
+    return errorResponse("IN_PROGRESS",
+      "This payment identifier is being processed right now. Retry shortly; you will not be charged twice.", 409);
+
   if (r.tipo === "repetido") {
     const cabeceras = {
       "content-type": "application/json; charset=utf-8",

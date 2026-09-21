@@ -21,7 +21,7 @@
 import { runCheck, EngineError } from "./engine.mjs";
 import { retoDePago, cabeceraLiquidacion } from "./x402.mjs";
 import { verificarPago, liquidarPago, veredictoCobrable } from "./facilitador.mjs";
-import { leerIdentificador, huella, consultar as consultarIdem, guardar as guardarIdem } from "./idempotencia.mjs";
+import { leerIdentificador, huella, reclamar, liberar, finalizar } from "./idempotencia.mjs";
 import { markAnswerCharged } from "./answerlog.mjs";
 
 /**
@@ -112,31 +112,53 @@ export function retoConPuertaHumana(env, { url, motivo, precio = null } = {}) {
  * seguro — se niega a servir antes que arriesgarse a cobrar dos veces.
  */
 export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, precio }) {
-  // 3) Idempotencia ANTES de verificar y antes de gastar el modelo. Un reintento
-  //    no puede costar dinero ni computo.
+  // 3) LA PUERTA. PR-2 — BLQ-X402-GATE-01.
+  //
+  //    Antes esto era una LECTURA, y la escritura venía al final, DESPUES de
+  //    /settle. Entre una y otra no había nada atómico: dos peticiones con el
+  //    mismo identificador pasaban las dos, gastaban el motor las dos y
+  //    liquidaban LAS DOS. Ahora se reclama primero, y el permiso lo da el
+  //    numero de filas que devuelve el motor. Sin ese permiso no se sigue.
   const idPago = leerIdentificador(pago);
   let h = null;
   if (idPago) {
     h = await huella({ aceptado, metodo: "POST", ruta, cuerpo: peticion });
-    const previo = await consultarIdem(env, idPago, h);
-    if (previo && previo.conflicto) return { tipo: "conflicto" };
-    if (previo && previo.repetido)
+    const puerta = await reclamar(env, { id: idPago, huella: h });
+
+    if (puerta.conflicto) return { tipo: "conflicto" };
+    if (puerta.repetido)
       return {
         tipo: "repetido",
-        cuerpo: previo.cuerpo,
-        estado: previo.estado,
-        transaccion: previo.transaccion || null,
+        cuerpo: puerta.cuerpo,
+        estado: puerta.estado,
+        transaccion: puerta.transaccion || null,
       };
+    if (puerta.enCurso) return { tipo: "en_curso" };
+
+    //  Sin puerta no se liquida. Aquí se falla cerrado a propósito, y es lo
+    //  contrario de lo que hace `consultar`: allí perder la idempotencia solo
+    //  cuesta la protección, aquí cuesta cobrar dos veces. El cliente recibe un
+    //  402 y reintenta; no se ha movido un céntimo.
+    if (!puerta.dueno)
+      return { tipo: "reto", motivo: "Idempotency gate unavailable, nothing was charged: " + (puerta.motivo || "unknown") };
   }
+
+  // A partir de aquí la reclamación es NUESTRA. Se suelta solo cuando consta que
+  // el dinero no se movió; ante la duda se queda puesta y caduca sola.
+  const soltar = async () => { if (idPago) await liberar(env, idPago); };
 
   // 4) Verificar ANTES de trabajar. Falla cerrado.
   const ver = await verificarPago(env, { pago, requisitos: aceptado });
-  if (!ver.valido) return { tipo: "reto", motivo: "Payment verification failed: " + ver.motivo };
+  if (!ver.valido) {
+    await soltar();
+    return { tipo: "reto", motivo: "Payment verification failed: " + ver.motivo };
+  }
 
   // 5) El motor. Del pagador solo se guarda su huella, igual que de una clave.
   let resp;
   try { resp = await runCheck(env, { ...peticion, __api_key: ver.pagador || null }); }
   catch (e) {
+    await soltar();
     if (e instanceof EngineError) return { tipo: "error", code: e.code, message: e.message, http: e.http };
     return { tipo: "error", code: "INTERNAL", message: "Unexpected error.", http: 500 };
   }
@@ -152,6 +174,12 @@ export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, preci
       // convertiria "haz que falle la liquidacion" en la forma de tener respuestas
       // gratis.
       await markAnswerCharged(env, checkId, 0, false);
+      // `!cobrado && !pendiente` es el caso NO SALIO de W41: facilitador
+      // inalcanzable o sin configurar, la peticion no llego a irse. Consta que
+      // el dinero no se movio, asi que la reclamacion se suelta y el cliente
+      // puede reintentar. El caso "no se" —pendiente o incierto— no pasa por
+      // aqui, y ahi la reclamacion se queda puesta.
+      await soltar();
       return { tipo: "reto", motivo: "Payment settlement failed: " + liq.motivo };
     }
     transaccion = liq.transaccion || null;
@@ -171,9 +199,11 @@ export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, preci
       network: aceptado.network, payer: ver.pagador });
   }
 
-  // 7) Guardar para que el reintento no vuelva a cobrar.
+  // 7) Cerrar la reclamacion con la respuesta servida. Ya no es un
+  //    `INSERT OR REPLACE` que siempre gana: es un UPDATE sobre NUESTRA fila,
+  //    que solo entra si la reclamacion del paso 3 sigue siendo nuestra.
   const cuerpo = JSON.stringify(resp);
-  if (idPago && h) await guardarIdem(env, { id: idPago, huella: h, cuerpo, estado: 200, transaccion });
+  if (idPago && h) await finalizar(env, { id: idPago, cuerpo, estado: 200, transaccion });
 
   return { tipo: "ok", resp, cuerpo, coste, transaccion, estadoLiquidacion, cabeceraPago };
 }

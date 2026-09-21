@@ -436,6 +436,10 @@ async function pagarConX402(args, env, request, vehiculos) {
   if (r.tipo === "conflicto")
     return toolText("This payment identifier was already used for a different request.", true);
 
+  // PR-2. Misma pregunta, mismo identificador, y hay otra peticion dentro.
+  if (r.tipo === "en_curso")
+    return toolText("This payment identifier is being processed right now. Retry shortly; you will not be charged twice.", true);
+
   // Reintento: se devuelve lo ya servido y NO se ha vuelto a cobrar. La
   // liquidacion existio —fue la del cobro original— asi que la prueba se
   // devuelve igual, con su transaccion y coste 0. Es lo mismo que hace HTTP, que
