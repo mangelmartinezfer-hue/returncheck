@@ -1,5 +1,7 @@
 # ReturnCheck — Verified return-policy API for AI shopping agents
 
+[![Wellknown verified](https://wellknown.network/agents/returncheck/badge.svg)](https://wellknown.network/agents/returncheck)
+
 **Can this specific product actually be returned?** ReturnCheck answers that one
 question for AI shopping agents, with a **verified** verdict — not a guess.
 
