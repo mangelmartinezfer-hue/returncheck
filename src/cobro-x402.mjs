@@ -21,7 +21,15 @@
 import { runCheck, EngineError } from "./engine.mjs";
 import { retoDePago, cabeceraLiquidacion } from "./x402.mjs";
 import { verificarPago, liquidarPago, veredictoCobrable } from "./facilitador.mjs";
-import { leerIdentificador, huella, reclamar, liberar, finalizar } from "./idempotencia.mjs";
+import {
+  leerIdentificador,
+  huella,
+  reclamar as reclamarIdem,
+  esperarResultado as esperarIdem,
+  prepararLiquidacion,
+  completar as completarIdem,
+  liberar as liberarIdem,
+} from "./idempotencia.mjs";
 import { markAnswerCharged } from "./answerlog.mjs";
 
 /**
@@ -112,45 +120,69 @@ export function retoConPuertaHumana(env, { url, motivo, precio = null } = {}) {
  * seguro — se niega a servir antes que arriesgarse a cobrar dos veces.
  */
 export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, precio }) {
-  // 3) LA PUERTA. PR-2 — BLQ-X402-GATE-01.
-  //
-  //    Antes esto era una LECTURA, y la escritura venía al final, DESPUES de
-  //    /settle. Entre una y otra no había nada atómico: dos peticiones con el
-  //    mismo identificador pasaban las dos, gastaban el motor las dos y
-  //    liquidaban LAS DOS. Ahora se reclama primero, y el permiso lo da el
-  //    numero de filas que devuelve el motor. Sin ese permiso no se sigue.
+  // 3) PUERTA ATOMICA antes de verificar, de gastar el modelo y de /settle.
+  //    Sin identificador no existe una identidad sobre la que excluir carreras.
   const idPago = leerIdentificador(pago);
-  let h = null;
-  if (idPago) {
-    h = await huella({ aceptado, metodo: "POST", ruta, cuerpo: peticion });
-    const puerta = await reclamar(env, { id: idPago, huella: h });
+  if (!idPago) {
+    return {
+      tipo: "error",
+      code: "PAYMENT_IDENTIFIER_REQUIRED",
+      message: "A valid payment-identifier extension is required for paid calls.",
+      http: 400,
+    };
+  }
+  const h = await huella({ aceptado, metodo: "POST", ruta, cuerpo: peticion });
 
-    if (puerta.conflicto) return { tipo: "conflicto" };
-    if (puerta.repetido)
+  const comoResultadoPrevio = (previo) => {
+    if (previo && previo.conflicto) return { tipo: "conflicto" };
+    if (previo && previo.rechazado)
+      return {
+        tipo: "reto",
+        motivo: "The previous settlement was rejected; this payment identifier cannot be retried automatically.",
+      };
+    if (previo && previo.repetido)
       return {
         tipo: "repetido",
-        cuerpo: puerta.cuerpo,
-        estado: puerta.estado,
-        transaccion: puerta.transaccion || null,
+        cuerpo: previo.cuerpo,
+        estado: previo.estado,
+        transaccion: previo.transaccion || null,
+        estadoLiquidacion: previo.estadoLiquidacion || "replay",
       };
-    if (puerta.enCurso) return { tipo: "en_curso" };
+    if (previo && previo.error)
+      return {
+        tipo: "error",
+        code: "PAYMENT_GATE_UNAVAILABLE",
+        message: previo.motivo || "Payment gate is not available.",
+        http: 503,
+      };
+    return null;
+  };
 
-    //  Sin puerta no se liquida. Aquí se falla cerrado a propósito, y es lo
-    //  contrario de lo que hace `consultar`: allí perder la idempotencia solo
-    //  cuesta la protección, aquí cuesta cobrar dos veces. El cliente recibe un
-    //  402 y reintenta; no se ha movido un céntimo.
-    if (!puerta.dueno)
-      return { tipo: "reto", motivo: "Idempotency gate unavailable, nothing was charged: " + (puerta.motivo || "unknown") };
+  let puerta = await reclamarIdem(env, { id: idPago, huella: h });
+  let anterior = comoResultadoPrevio(puerta);
+  if (anterior) return anterior;
+
+  if (puerta && puerta.enCurso) {
+    puerta = await esperarIdem(env, idPago, h);
+    anterior = comoResultadoPrevio(puerta);
+    if (anterior) return anterior;
+    return { tipo: "en_curso" };
   }
 
-  // A partir de aquí la reclamación es NUESTRA. Se suelta solo cuando consta que
-  // el dinero no se movió; ante la duda se queda puesta y caduca sola.
-  const soltar = async () => { if (idPago) await liberar(env, idPago); };
+  if (!puerta || puerta.propietaria !== true || !puerta.attemptId) {
+    return {
+      tipo: "error",
+      code: "PAYMENT_GATE_UNAVAILABLE",
+      message: "Payment gate did not grant an authoritative owner.",
+      http: 503,
+    };
+  }
+  const attemptId = puerta.attemptId;
 
   // 4) Verificar ANTES de trabajar. Falla cerrado.
   const ver = await verificarPago(env, { pago, requisitos: aceptado });
   if (!ver.valido) {
-    await soltar();
+    await liberarIdem(env, { id: idPago, huella: h, attemptId });
     return { tipo: "reto", motivo: "Payment verification failed: " + ver.motivo };
   }
 
@@ -158,28 +190,49 @@ export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, preci
   let resp;
   try { resp = await runCheck(env, { ...peticion, __api_key: ver.pagador || null }); }
   catch (e) {
-    await soltar();
+    await liberarIdem(env, { id: idPago, huella: h, attemptId });
     if (e instanceof EngineError) return { tipo: "error", code: e.code, message: e.message, http: e.http };
     return { tipo: "error", code: "INTERNAL", message: "Unexpected error.", http: 500 };
   }
   const checkId = resp.meta && resp.meta.check_id;
+  const cuerpo = JSON.stringify(resp);
 
   // 6) Liquidar. UNKNOWN no se liquida: la autorizacion caduca sin usarse y no se
   //    mueve un centimo. Decision del 22 de agosto.
   let cabeceraPago = null, coste = 0, transaccion = null, estadoLiquidacion = "not_charged";
   if (veredictoCobrable(resp.verdict, env)) {
+    // El resultado queda durable ANTES de enviar /settle. Si el proceso cae en la
+    // frontera, un replay puede entregarlo como incierto sin volver a liquidar.
+    const preparado = await prepararLiquidacion(env, {
+      id: idPago, huella: h, attemptId, cuerpo, estado: 200,
+    });
+    if (!preparado) {
+      // /settle todavia no se ha llamado: si seguimos siendo propietarios, es
+      // seguro liberar. Si perdimos la propiedad, attempt_id impide borrar la
+      // fila de la nueva propietaria.
+      await liberarIdem(env, { id: idPago, huella: h, attemptId });
+      return {
+        tipo: "error",
+        code: "PAYMENT_GATE_UNAVAILABLE",
+        message: "The payment result could not be persisted before settlement.",
+        http: 503,
+      };
+    }
+
     const liq = await liquidarPago(env, { pago, requisitos: aceptado });
     if (!liq.cobrado && !liq.pendiente) {
       // El trabajo esta hecho y lo hemos pagado nosotros. Servir igualmente
       // convertiria "haz que falle la liquidacion" en la forma de tener respuestas
       // gratis.
       await markAnswerCharged(env, checkId, 0, false);
-      // `!cobrado && !pendiente` es el caso NO SALIO de W41: facilitador
-      // inalcanzable o sin configurar, la peticion no llego a irse. Consta que
-      // el dinero no se movio, asi que la reclamacion se suelta y el cliente
-      // puede reintentar. El caso "no se" —pendiente o incierto— no pasa por
-      // aqui, y ahi la reclamacion se queda puesta.
-      await soltar();
+      // /settle YA se invoco. Una respuesta rechazada no demuestra que sea
+      // seguro competir otra vez con la misma autorizacion, y un error al
+      // guardar este desenlace debe conservar el estado `settling`, nunca abrir
+      // una segunda liquidacion.
+      await completarIdem(env, {
+        id: idPago, huella: h, attemptId, cuerpo, estado: 402,
+        transaccion: liq.transaccion || null, estadoLiquidacion: "rejected",
+      });
       return { tipo: "reto", motivo: "Payment settlement failed: " + liq.motivo };
     }
     transaccion = liq.transaccion || null;
@@ -199,11 +252,23 @@ export async function cobrarConX402(env, { pago, aceptado, peticion, ruta, preci
       network: aceptado.network, payer: ver.pagador });
   }
 
-  // 7) Cerrar la reclamacion con la respuesta servida. Ya no es un
-  //    `INSERT OR REPLACE` que siempre gana: es un UPDATE sobre NUESTRA fila,
-  //    que solo entra si la reclamacion del paso 3 sigue siendo nuestra.
-  const cuerpo = JSON.stringify(resp);
-  if (idPago && h) await finalizar(env, { id: idPago, cuerpo, estado: 200, transaccion });
+  // 7) Cerrar la puerta. Tras /settle un fallo de esta escritura NO invita a
+  //    reintentar: el estado `settling` ya contiene el resultado y bloquea una
+  //    segunda liquidacion. Para UNKNOWN, que nunca se liquida, sí se exige el
+  //    cierre o se libera y se falla.
+  const cerrado = await completarIdem(env, {
+    id: idPago, huella: h, attemptId, cuerpo, estado: 200,
+    transaccion, estadoLiquidacion,
+  });
+  if (!cerrado && estadoLiquidacion === "not_charged") {
+    await liberarIdem(env, { id: idPago, huella: h, attemptId });
+    return {
+      tipo: "error",
+      code: "PAYMENT_GATE_UNAVAILABLE",
+      message: "The idempotency result could not be committed.",
+      http: 503,
+    };
+  }
 
   return { tipo: "ok", resp, cuerpo, coste, transaccion, estadoLiquidacion, cabeceraPago };
 }

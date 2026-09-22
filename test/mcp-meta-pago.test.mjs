@@ -21,12 +21,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.mjs";
 import { meterEnSobre, sacarDelSobre } from "../src/x402.mjs";
+import { evidenciaDePago } from "../src/mcp.mjs";
+import { dbPuerta as db } from "./dobles/db-puerta.mjs";
 
 const PAY_TO = "0xbF428071027402E9b0cE85e22146EDdc028cEB3b";
 const ASSET  = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const RED    = "eip155:8453";
 const TX     = "0xdeadbeefcafe0000000000000000000000000000000000000000000000000002";
 const PAYER  = "0x857bEEF0000000000000000000000000000000aa";
+const ID_POR_DEFECTO = "returncheck-test-payment-0002";
 
 const POLIZA = "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery. Items must be unopened and include all original accessories.";
 
@@ -36,6 +39,14 @@ const PETICION = {
   purchase_date: "2026-08-01", delivery_date: "2026-08-05", as_of: "2026-08-20",
   page_text: POLIZA,
 };
+
+test("PR-2: un replay incierto no fabrica SettlementResponse", () => {
+  const ev = evidenciaDePago({ estado: "unconfirmed", cabecera: null, coste: 0, transaccion: TX });
+  assert.equal(ev.bloque.settlement, "unconfirmed");
+  assert.equal(ev.bloque.transaction, TX, "conserva el hash conocido sin inventar el resto");
+  assert.equal(ev.bloque.payment_response, null);
+  assert.equal(ev.settlement, null);
+});
 
 function ia(verdict) {
   const det = verdict !== "UNKNOWN";
@@ -49,21 +60,6 @@ function ia(verdict) {
     evidence: det ? { source_url: PETICION.product_url, clause_id: null,
                       exact_clause: "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery." } : null,
   }) }) };
-}
-
-// PR-2 — este doble tuvo que cambiar, y conviene decir por que. Antes devolvia
-// `changes: 0` a todo, y daba igual: el codigo de cobro no miraba ese numero.
-// Ahora la PUERTA decide con el, y un cero significa «otro reclamo primero este
-// identificador». Sobre una base vacia eso es falso, asi que el doble tiene que
-// decir la verdad: la reclamacion entra, changes 1. Si hay `idemFila`, la fila
-// ya existe y entonces el cero SI es correcto.
-function db({ idemFila = null } = {}) {
-  const g = { run: async () => ({ meta: { changes: 0 } }), first: async () => null, all: async () => ({ results: [] }) };
-  return { prepare: (sql) => ({
-    bind: () => ({ ...g,
-      run: async () => ({ meta: { changes: (/INTO payment_idempotency/.test(sql) && !idemFila) ? 1 : 0 } }),
-      first: async () => (idemFila && /FROM payment_idempotency/.test(sql)) ? idemFila : null }),
-    ...g }) };
 }
 
 const ENV = {
@@ -80,7 +76,7 @@ const AUTORIZACION = { from: PAYER, to: PAY_TO, value: "20000",
                        validAfter: "0", validBefore: "1893456000", nonce: "0xabc123" };
 
 // El PaymentPayload estandar, como objeto.
-function pagoObjeto({ amount = "20000", id = null } = {}) {
+function pagoObjeto({ amount = "20000", id = ID_POR_DEFECTO } = {}) {
   const payload = { signature: "0xsig", authorization: { ...AUTORIZACION } };
   if (id) payload.extensions = { "payment-identifier": id };
   return { x402Version: 2, accepted: { ...ACEPTADO, amount }, payload };
@@ -92,7 +88,7 @@ function pagoObjeto({ amount = "20000", id = null } = {}) {
  * comparacion no fuera recursiva, esto se leeria como un pago distinto y
  * rechazariamos a un cliente que no ha hecho nada malo.
  */
-function pagoObjetoOrdenInverso({ amount = "20000", id = null } = {}) {
+function pagoObjetoOrdenInverso({ amount = "20000", id = ID_POR_DEFECTO } = {}) {
   const auth = {};
   for (const k of Object.keys(AUTORIZACION).reverse()) auth[k] = AUTORIZACION[k];
   const aceptado = { ...ACEPTADO, amount };
@@ -433,8 +429,6 @@ test("W51: solo `confirmed` emite el objeto estandar — los otros tres no", asy
 // puede pasar" no es una invariante: es una coincidencia entre dos ficheros que
 // alguien puede romper sin darse cuenta.
 // ---------------------------------------------------------------------------
-
-const { evidenciaDePago } = await import("../src/mcp.mjs");
 
 const sobreDe = (o) => meterEnSobre(o);
 const COMPLETO = { success: true, transaction: TX, network: RED, payer: PAYER };

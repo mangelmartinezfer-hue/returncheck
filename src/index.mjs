@@ -882,12 +882,9 @@ async function handleCheckX402(request, env) {
     return errorResponse("CONFLICT",
       "This payment identifier was already used for a different request.", 409);
 
-  // PR-2. Otra peticion con el MISMO identificador y la MISMA pregunta esta
-  // dentro ahora mismo. No es un conflicto —la pregunta es la suya— y decirle
-  // que lo es seria mentirle. Que reintente: no se le cobrara dos veces.
   if (r.tipo === "en_curso")
-    return errorResponse("IN_PROGRESS",
-      "This payment identifier is being processed right now. Retry shortly; you will not be charged twice.", 409);
+    return errorResponse("PAYMENT_IN_FLIGHT",
+      "Another request owns this payment identifier and is still processing.", 409);
 
   if (r.tipo === "repetido") {
     const cabeceras = {
@@ -895,8 +892,15 @@ async function handleCheckX402(request, env) {
       "access-control-allow-origin": "*",
       "X-ReturnCheck-Replay": "true",     // no se ha vuelto a cobrar
       "X-ReturnCheck-Cost": "0.0000",
+      "X-ReturnCheck-Settlement":
+        ["pending", "unconfirmed"].includes(r.estadoLiquidacion)
+          ? r.estadoLiquidacion
+          : "replay",
     };
-    if (r.transaccion)
+    // Un replay incierto conserva el estado propio, pero no fabrica un
+    // SettlementResponse binario. Solo confirmado (o una fila historica que ya
+    // era un replay con hash) puede emitir PAYMENT-RESPONSE.
+    if (r.transaccion && ["confirmed", "replay"].includes(r.estadoLiquidacion))
       cabeceras["PAYMENT-RESPONSE"] = cabeceraLiquidacion({
         success: true, transaction: r.transaccion, network: aceptado.network, payer: null });
     return new Response(r.cuerpo, { status: r.estado, headers: cabeceras });

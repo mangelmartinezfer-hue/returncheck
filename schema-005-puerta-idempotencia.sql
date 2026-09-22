@@ -1,33 +1,49 @@
--- PR-2 — LA PUERTA ATÓMICA ANTES DE /settle (BLQ-X402-GATE-01)
+-- PR-2 — PUERTA ATOMICA ANTES DE /settle
 --
--- Se aplica SOBRE una base que ya tiene schema.sql, 002, 003 y 004.
--- Se ejecuta UNA sola vez y ANTES de desplegar el código que escribe aquí:
+-- Se aplica SOBRE una base que ya tiene schema-004-idempotencia.sql.
+-- Se ejecuta UNA sola vez y ANTES de desplegar el codigo de PR-2:
 --   npx wrangler d1 execute returncheck --remote --file=schema-005-puerta-idempotencia.sql
 --
--- QUÉ ARREGLA. Hasta ahora el camino de cobro leía `payment_idempotency`, hacía
--- el trabajo, llamaba al facilitador y DESPUÉS escribía la fila con un
--- `INSERT OR REPLACE`. Entre la lectura y la escritura no había nada atómico:
--- dos peticiones con el mismo identificador de pago pasaban las dos el control,
--- gastaban el motor las dos y llamaban a /settle LAS DOS. Y un `INSERT OR
--- REPLACE` siempre tiene éxito, así que por construcción no podía servir de
--- puerta: nunca devuelve el cero que distingue al perdedor.
---
--- CÓMO SE ARREGLA. La fila se crea ANTES de verificar, con
--- `INSERT ... ON CONFLICT (payment_id) DO NOTHING`. El motor devuelve 1 al
--- ganador y 0 al perdedor, y ese número —el de verdad, el del motor, no uno
--- fabricado en un `catch`— es lo único que da permiso para seguir.
---
--- MIGRACIÓN ADITIVA, como manda el contrato congelado: solo se añaden columnas.
--- Ninguna fila existente cambia de significado. Las que ya están se quedan en
--- 'done', que es lo que son: respuestas ya servidas.
+-- IMPORTANTE: un UPDATE que afecta cero filas no aborta un lote D1. Por eso el
+-- permiso monetario nace de un INSERT con conflicto sobre payment_id, y el Worker
+-- solo puede continuar cuando el motor devuelve meta.changes === 1.
 
--- 'in_flight' = alguien reclamó el identificador y todavía está trabajando.
--- 'done'      = la respuesta está guardada y se puede devolver tal cual.
-ALTER TABLE payment_idempotency ADD COLUMN status TEXT NOT NULL DEFAULT 'done';
+-- Las filas anteriores ya contienen una respuesta servida, por eso el valor por
+-- defecto es completed. Las nuevas empiezan claimed, pasan a settling DESPUES de
+-- persistir el resultado y ANTES de /settle, y terminan completed.
+ALTER TABLE payment_idempotency
+  ADD COLUMN gate_state TEXT NOT NULL DEFAULT 'completed'
+    CHECK (gate_state IN ('claimed','settling','completed'));
 
--- Cuándo se reclamó. Sin esto, una petición que muere a medio camino dejaría el
--- identificador bloqueado para siempre y el cliente no podría reintentar nunca.
-ALTER TABLE payment_idempotency ADD COLUMN claimed_at TEXT;
+-- Identidad generada por el servidor. Impide que una invocacion que solo conoce
+-- payment_id pueda completar o liberar el intento de otra.
+ALTER TABLE payment_idempotency ADD COLUMN attempt_id TEXT;
 
--- Para encontrar reclamaciones colgadas en la conciliación.
-CREATE INDEX IF NOT EXISTS idx_idem_en_curso ON payment_idempotency(status, claimed_at);
+-- Estado propio de ReturnCheck. No se usa para fabricar un SettlementResponse:
+-- pending y unconfirmed siguen sin emitir el sobre estandar.
+ALTER TABLE payment_idempotency
+  ADD COLUMN settlement_state TEXT
+    CHECK (settlement_state IS NULL OR settlement_state IN
+      ('not_charged','confirmed','pending','unconfirmed','rejected'));
+
+ALTER TABLE payment_idempotency ADD COLUMN updated_at TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_idem_gate_state
+  ON payment_idempotency(gate_state, updated_at);
+
+-- Las filas historicas terminadas no tienen attempt_id. Las nuevas que pueden
+-- conceder permiso monetario si lo necesitan: sin propietario no existe forma
+-- de impedir que una invocacion complete o libere la fila de otra.
+CREATE TRIGGER IF NOT EXISTS trg_idem_gate_owner_insert
+BEFORE INSERT ON payment_idempotency
+WHEN NEW.gate_state IN ('claimed','settling') AND NEW.attempt_id IS NULL
+BEGIN
+  SELECT RAISE(ABORT, 'RC_PAYMENT_GATE_OWNER_REQUIRED');
+END;
+
+CREATE TRIGGER IF NOT EXISTS trg_idem_gate_owner_update
+BEFORE UPDATE ON payment_idempotency
+WHEN NEW.gate_state IN ('claimed','settling') AND NEW.attempt_id IS NULL
+BEGIN
+  SELECT RAISE(ABORT, 'RC_PAYMENT_GATE_OWNER_REQUIRED');
+END;

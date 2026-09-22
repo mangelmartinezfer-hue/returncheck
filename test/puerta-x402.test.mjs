@@ -1,330 +1,334 @@
-// PR-2 — LA PUERTA ATÓMICA ANTES DE /settle. BLQ-X402-GATE-01.
-//
-// QUÉ SE ROMPÍA. En `src/cobro-x402.mjs` el orden era: leer idempotencia,
-// verificar, gastar el motor, llamar a /settle, y ESCRIBIR la idempotencia
-// después, con un `INSERT OR REPLACE`. Entre la lectura y la escritura no había
-// nada atómico. Dos peticiones con el mismo identificador de pago pasaban las
-// dos la lectura —porque ninguna había escrito todavía—, gastaban el motor las
-// dos y llamaban al facilitador LAS DOS. Un cobro doble por una sola pregunta.
-//
-// Y el `INSERT OR REPLACE` no podía arreglarlo ni queriendo: siempre tiene
-// éxito, así que nunca devuelve el cero que distingue al perdedor.
-//
-// CÓMO SE MIDE AQUÍ. Con SQLite de verdad debajo (`test/dobles/d1-sqlite.mjs`)
-// y el esquema real leído de los .sql, no con un `Map` que devuelva los números
-// que a uno le convengan. Y el facilitador de mentira TARDA en /verify: así la
-// segunda petición entra mientras la primera está dentro, que es exactamente el
-// hueco por el que se colaba el cobro doble. Con el código anterior estas
-// pruebas verían dos llamadas a /settle.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import worker from "../src/index.mjs";
 import { cobrarConX402 } from "../src/cobro-x402.mjs";
-import { reclamar, liberar, finalizar, huella } from "../src/idempotencia.mjs";
-import { baseReal, filaIdem, cuantasIdem } from "./dobles/d1-sqlite.mjs";
+import { validateRequest } from "../src/contract.mjs";
+import { meterEnSobre } from "../src/x402.mjs";
+import {
+  baseReal, aplicarEsquema, filaIdem, cuantasIdem,
+} from "./dobles/d1-sqlite.mjs";
+import {
+  huella, reclamar, prepararLiquidacion, completar, liberar,
+} from "../src/idempotencia.mjs";
 
 const PAY_TO = "0xbF428071027402E9b0cE85e22146EDdc028cEB3b";
-const ASSET  = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
-const RED    = "eip155:8453";
-const TX     = "0xdeadbeefcafe0000000000000000000000000000000000000000000000000002";
-const PAYER  = "0x857bEEF0000000000000000000000000000000aa";
-const ID     = "pay_0123456789abcdef0123456789abcdef";
+const ASSET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+const RED = "eip155:8453";
+const PAYER = "0x857bEEF0000000000000000000000000000000aa";
+const TX = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const ID = "returncheck-concurrent-payment-0001";
 
-const POLIZA = "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery. Items must be unopened and include all original accessories.";
-
-const PETICION = {
-  product_url: "https://eval.example/p/RC25-01",
-  buyer_country: "US", item_condition: "unopened", reason: "changed_mind",
-  purchase_date: "2026-08-01", delivery_date: "2026-08-05", as_of: "2026-08-20",
-  page_text: POLIZA,
+const ACEPTADO = {
+  scheme: "exact", network: RED, amount: "20000", asset: ASSET, payTo: PAY_TO,
 };
 
-const ACEPTADO = { scheme: "exact", network: RED, amount: "20000", asset: ASSET, payTo: PAY_TO };
-const RUTA = "/v1/check_return";
+const PETICION_CRUDA = {
+  product_url: "https://eval.example/p/pr2",
+  buyer_country: "US",
+  item_condition: "unopened",
+  reason: "changed_mind",
+  purchase_date: "2026-08-01",
+  delivery_date: "2026-08-05",
+  as_of: "2026-08-20",
+  page_text: "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery.",
+};
 
 function pago(id = ID) {
-  const payload = { signature: "0xsig", authorization: { from: PAYER, to: PAY_TO, value: "20000" } };
-  if (id) payload.extensions = { "payment-identifier": id };
+  const payload = {
+    signature: "0xsig",
+    authorization: { from: PAYER, to: PAY_TO, value: "20000", nonce: "0x01" },
+  };
+  if (id !== null) payload.extensions = { "payment-identifier": id };
   return { x402Version: 2, accepted: { ...ACEPTADO }, payload };
 }
 
-// El motor, con contador: gastar el modelo dos veces por una pregunta pagada una
-// vez tambien es un fallo, aunque no cueste USDC.
-function motor() {
-  const c = { veces: 0 };
-  c.AI = { run: async () => {
-    c.veces++;
-    return { response: JSON.stringify({
-      verdict: "YES", confidence: 0.9,
-      answer_human: "Yes. Within the 30-day window.", reason: null,
-      merchant_resolved: { name: "eval.example", domain: "eval.example", is_marketplace_third_party: false },
-      policy: { return_category: "MerchantReturnFiniteReturnWindow", merchant_return_days: 30,
-                window_basis: "delivery_date", return_method: [], return_fees: null, refund_type: null },
-      evidence: { source_url: PETICION.product_url, clause_id: null,
-                  exact_clause: "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery." },
-    }) };
-  } };
-  return c;
+function ia(contadores) {
+  return {
+    run: async () => {
+      contadores.motor++;
+      return { response: JSON.stringify({
+        verdict: "YES",
+        confidence: 0.99,
+        answer_human: "Yes. Within the 30-day window.",
+        reason: null,
+        merchant_resolved: {
+          name: "eval.example", domain: "eval.example", is_marketplace_third_party: false,
+        },
+        policy: {
+          return_category: "MerchantReturnFiniteReturnWindow",
+          merchant_return_days: 30,
+          window_basis: "delivery_date",
+          return_method: [], return_fees: null, refund_type: null,
+        },
+        evidence: {
+          source_url: PETICION_CRUDA.product_url,
+          clause_id: null,
+          exact_clause: "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery.",
+        },
+      }) };
+    },
+  };
 }
 
-// El facilitador de mentira. `tardaVerify` es lo que abre el hueco de la carrera.
-//
-// `settle` admite tres desenlaces, y la diferencia entre ellos decide si la
-// reclamacion se suelta o se queda: "ok" (cobrado), "no_salio" (la peticion no
-// llego a irse: el dinero NO se movio) y "no_se" (un 504: la peticion salio y
-// puede haberse ejecutado). Es la distincion de W41, y aqui vale dinero.
-function facilitador({ tardaVerify = 0, verificaOk = true, settle = "ok" } = {}) {
-  const c = { verify: 0, settle: 0 };
+function env(DB, contadores) {
+  return {
+    DB,
+    AI: ia(contadores),
+    ANSWER_LOG: "false",
+    X402_ENABLED: "true",
+    PRICE_USD: "0.02",
+    X402_FACILITATOR: "https://facilitador.example",
+    X402_NETWORK: RED,
+    X402_ASSET: ASSET,
+    X402_PAY_TO: PAY_TO,
+    PAYMENT_GATE_WAIT_MS: "1000",
+  };
+}
+
+async function conFacilitador(
+  contadores, fn,
+  { settleIncierto = false, settleRechazado = false, demoraSettle = 10 } = {}
+) {
   const original = globalThis.fetch;
   globalThis.fetch = async (url) => {
-    const u = String(url);
-    if (u.endsWith("/verify")) {
-      c.verify++;
-      if (tardaVerify) await new Promise((r) => setTimeout(r, tardaVerify));
-      return { ok: true, status: 200,
-               json: async () => ({ isValid: verificaOk, payer: PAYER,
-                                    invalidReason: verificaOk ? null : "bad_signature" }) };
+    if (String(url).endsWith("/verify")) {
+      contadores.verify++;
+      return { ok: true, status: 200, json: async () => ({ isValid: true, payer: PAYER }) };
     }
-    if (u.endsWith("/settle")) {
-      c.settle++;
-      if (settle === "no_salio") throw new TypeError("fetch failed");
-      if (settle === "no_se") return { ok: false, status: 504, json: async () => ({}) };
-      return { ok: true, status: 200,
-               json: async () => ({ success: true, transaction: TX, network: RED, payer: PAYER }) };
+    if (String(url).endsWith("/settle")) {
+      contadores.settle++;
+      if (demoraSettle) await new Promise((resolve) => setTimeout(resolve, demoraSettle));
+      if (settleIncierto) {
+        const error = new Error("respuesta perdida despues de enviar");
+        error.name = "TimeoutError";
+        throw error;
+      }
+      if (settleRechazado) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ success: false, errorReason: "authorization_already_used" }),
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ success: true, transaction: TX, network: RED, payer: PAYER }),
+      };
     }
-    return { ok: false, status: 404, json: async () => ({}) };
+    throw new Error("red inesperada: " + url);
   };
-  c.restaurar = () => { globalThis.fetch = original; };
-  return c;
+  try { return await fn(); }
+  finally { globalThis.fetch = original; }
 }
 
-function entorno(extra = {}) {
-  const m = motor();
-  return { m, env: {
-    PUBLIC_BASE_URL: "https://rc.example", PRICE_USD: "0.02", ANSWER_LOG: "false",
-    X402_ENABLED: "true", X402_NETWORK: RED, X402_PAY_TO: PAY_TO, X402_ASSET: ASSET,
-    X402_FACILITATOR: "https://facilitador.example", FREE_TRIAL_ENABLED: "false",
-    IDEMPOTENCY_HOURS: 24,
-    DB: baseReal(), AI: m.AI, ...extra,
-  } };
+function argumentos(peticion = PETICION_CRUDA, id = ID) {
+  const v = validateRequest(peticion);
+  assert.equal(v.ok, true);
+  return { pago: pago(id), aceptado: ACEPTADO, peticion: v.value, ruta: "/v1/check", precio: "0.02" };
 }
 
-const cobrar = (env, peticion = PETICION, id = ID) =>
-  cobrarConX402(env, { pago: pago(id), aceptado: ACEPTADO, peticion, ruta: RUTA, precio: "0.02" });
+test("PR-2: dos peticiones simultaneas producen un solo /settle y una sola ejecucion del motor", async () => {
+  const contadores = { verify: 0, motor: 0, settle: 0 };
+  const entorno = env(baseReal(), contadores);
 
-// ---------------------------------------------------------------------------
-// 1. EL FALLO. Dos peticiones a la vez, mismo identificador, misma pregunta:
-//    UNA sola llamada a /settle.
-// ---------------------------------------------------------------------------
+  const [a, b] = await conFacilitador(contadores, () => Promise.all([
+    cobrarConX402(entorno, argumentos()),
+    cobrarConX402(entorno, argumentos()),
+  ]));
 
-test("dos peticiones simultaneas con el mismo identificador liquidan UNA sola vez", async () => {
-  const { m, env } = entorno();
-  const f = facilitador({ tardaVerify: 25 });
-  try {
-    const [a, b] = await Promise.all([cobrar(env), cobrar(env)]);
-
-    // Lo que cuesta dinero, primero.
-    assert.equal(f.settle, 1, "se llamo al facilitador " + f.settle + " veces, y solo se pago una pregunta");
-
-    // Exactamente una sirvio respuesta pagada; la otra no.
-    const tipos = [a.tipo, b.tipo].sort();
-    assert.deepEqual(tipos, ["en_curso", "ok"]);
-
-    // Y una sola fila, la del ganador, cerrada.
-    assert.equal(cuantasIdem(env.DB), 1);
-    assert.equal(filaIdem(env.DB, ID).status, "done");
-    assert.equal(filaIdem(env.DB, ID).transaction_hash, TX);
-  } finally { f.restaurar(); }
+  assert.equal(contadores.verify, 1, "la perdedora no verifica");
+  assert.equal(contadores.motor, 1, "la perdedora no ejecuta el motor");
+  assert.equal(contadores.settle, 1, "exactamente una llamada a /settle");
+  assert.deepEqual(new Set([a.tipo, b.tipo]), new Set(["ok", "repetido"]));
+  assert.equal(a.cuerpo, b.cuerpo, "las dos reciben la misma respuesta funcional");
+  assert.equal(cuantasIdem(entorno.DB), 1);
+  assert.equal(filaIdem(entorno.DB, ID).gate_state, "completed");
 });
 
-// ---------------------------------------------------------------------------
-// 2. El perdedor NO gasta el motor, NO verifica y NO liquida. Y cuando
-//    reintenta, recibe la respuesta del ganador sin volver a pagar.
-// ---------------------------------------------------------------------------
+test("PR-2: mismo identificador con otra huella da conflicto y nunca inicia otro cobro", async () => {
+  const contadores = { verify: 0, motor: 0, settle: 0 };
+  const entorno = env(baseReal(), contadores);
+  // Cambia la huella sin invalidar la evidencia del motor.
+  const otra = { ...PETICION_CRUDA, membership: "Gold" };
 
-test("el perdedor no toca el motor ni el facilitador, y al reintentar recibe lo servido", async () => {
-  const { m, env } = entorno();
-  const f = facilitador({ tardaVerify: 25 });
-  try {
-    const [a, b] = await Promise.all([cobrar(env), cobrar(env)]);
-    const ganador = a.tipo === "ok" ? a : b;
+  const [a, b] = await conFacilitador(contadores, () => Promise.all([
+    cobrarConX402(entorno, argumentos()),
+    cobrarConX402(entorno, argumentos(otra)),
+  ]));
 
-    assert.equal(m.veces, 1, "el modelo se gasto " + m.veces + " veces");
-    assert.equal(f.verify, 1, "se verifico " + f.verify + " veces");
-    assert.equal(f.settle, 1);
-
-    // El reintento del perdedor, ya cerrada la fila del ganador.
-    const tercera = await cobrar(env);
-    assert.equal(tercera.tipo, "repetido");
-    assert.equal(tercera.cuerpo, ganador.cuerpo);
-    assert.equal(tercera.transaccion, TX);
-
-    // Y el reintento no ha vuelto a costar nada.
-    assert.equal(f.settle, 1);
-    assert.equal(m.veces, 1);
-  } finally { f.restaurar(); }
+  assert.equal(contadores.settle, 1);
+  assert.ok([a.tipo, b.tipo].includes("conflicto"));
+  assert.ok([a.tipo, b.tipo].includes("ok"));
 });
 
-// ---------------------------------------------------------------------------
-// 3. El permiso lo da el motor. Una excepcion NO es un cero.
-// ---------------------------------------------------------------------------
+test("PR-2: una excepción de D1 falla cerrado; no equivale a changes=0", async () => {
+  const contadores = { verify: 0, motor: 0, settle: 0 };
+  const entorno = env({ prepare: () => { throw new Error("D1 caida"); } }, contadores);
+  const r = await conFacilitador(contadores, () => cobrarConX402(entorno, argumentos()));
 
-test("la puerta da 1 al ganador y 0 al perdedor, y el 0 lo dice el motor", async () => {
-  const env = { DB: baseReal(), IDEMPOTENCY_HOURS: 24 };
-  const h = await huella({ aceptado: ACEPTADO, metodo: "POST", ruta: RUTA, cuerpo: PETICION });
-
-  assert.deepEqual(await reclamar(env, { id: ID, huella: h }), { dueno: true });
-  assert.deepEqual(await reclamar(env, { id: ID, huella: h }), { enCurso: true });
-  assert.equal(filaIdem(env.DB, ID).status, "in_flight");
-  assert.equal(filaIdem(env.DB, ID).response_json, "");
+  assert.equal(r.tipo, "error");
+  assert.equal(r.code, "PAYMENT_GATE_UNAVAILABLE");
+  assert.equal(r.http, 503);
+  assert.deepEqual(contadores, { verify: 0, motor: 0, settle: 0 });
 });
 
-test("si la base revienta la puerta dice INDETERMINADO, no cero, y NO se liquida", async () => {
-  const { env } = entorno({ DB: { prepare: () => ({ bind: () => ({
-    run: async () => { throw new Error("D1_ERROR: connection lost"); },
-    first: async () => { throw new Error("D1_ERROR: connection lost"); },
-  }) }) } });
-  const f = facilitador();
-  try {
-    const r = await cobrar(env);
-    assert.equal(r.tipo, "reto");
-    assert.match(r.motivo, /Idempotency gate unavailable/);
-    // Lo importante no es el texto: es que no se llamo al facilitador.
-    assert.equal(f.settle, 0, "se liquido sin puerta");
-    assert.equal(f.verify, 0);
-  } finally { f.restaurar(); }
+test("PR-2: una liquidacion incierta se sirve y su replay no vuelve a /settle", async () => {
+  const contadores = { verify: 0, motor: 0, settle: 0 };
+  const entorno = env(baseReal(), contadores);
+
+  const [primera, replay] = await conFacilitador(contadores, async () => {
+    const uno = await cobrarConX402(entorno, argumentos());
+    const dos = await cobrarConX402(entorno, argumentos());
+    return [uno, dos];
+  }, { settleIncierto: true, demoraSettle: 0 });
+
+  assert.equal(primera.tipo, "ok");
+  assert.equal(primera.estadoLiquidacion, "unconfirmed");
+  assert.equal(replay.tipo, "repetido");
+  assert.equal(replay.estadoLiquidacion, "unconfirmed");
+  assert.equal(replay.cuerpo, primera.cuerpo);
+  assert.deepEqual(contadores, { verify: 1, motor: 1, settle: 1 });
 });
 
-test("una verificacion fallida suelta la reclamacion: el identificador no queda quemado", async () => {
-  const { env } = entorno();
-  const f = facilitador({ verificaOk: false });
-  try {
-    const r = await cobrar(env);
-    assert.equal(r.tipo, "reto");
-    assert.equal(f.settle, 0, "no se liquida lo que no se ha verificado");
-    assert.equal(cuantasIdem(env.DB), 0, "la reclamacion se quedo puesta sin que se moviera dinero");
+test("PR-2: un rechazo de /settle bloquea el reintento monetario", async () => {
+  const contadores = { verify: 0, motor: 0, settle: 0 };
+  const entorno = env(baseReal(), contadores);
 
-    // Y el cliente puede volver a intentarlo con el mismo identificador.
-    f.restaurar();
-    const g = facilitador();
-    try {
-      const segunda = await cobrar(env);
-      assert.equal(segunda.tipo, "ok");
-      assert.equal(g.settle, 1);
-    } finally { g.restaurar(); }
-  } finally { globalThis.fetch && f.restaurar(); }
+  const [primera, replay] = await conFacilitador(contadores, async () => {
+    const uno = await cobrarConX402(entorno, argumentos());
+    const dos = await cobrarConX402(entorno, argumentos());
+    return [uno, dos];
+  }, { settleRechazado: true, demoraSettle: 0 });
+
+  assert.equal(primera.tipo, "reto");
+  assert.equal(replay.tipo, "reto");
+  assert.match(replay.motivo, /cannot be retried automatically/);
+  assert.deepEqual(contadores, { verify: 1, motor: 1, settle: 1 });
+  assert.equal(filaIdem(entorno.DB, ID).settlement_state, "rejected");
 });
 
-test("si la liquidacion NO llego a salir, se suelta: el dinero no se movio", async () => {
-  const { env } = entorno();
-  const f = facilitador({ settle: "no_salio" });
-  try {
-    const r = await cobrar(env);
-    assert.equal(r.tipo, "reto");
-    assert.match(r.motivo, /settlement failed/);
-    assert.equal(cuantasIdem(env.DB), 0);
-  } finally { f.restaurar(); }
+test("PR-2: sin payment-identifier no hay motor, verificacion ni liquidacion", async () => {
+  const contadores = { verify: 0, motor: 0, settle: 0 };
+  const entorno = env(baseReal(), contadores);
+  const r = await conFacilitador(contadores, () => cobrarConX402(entorno, argumentos(PETICION_CRUDA, null)));
+
+  assert.equal(r.tipo, "error");
+  assert.equal(r.code, "PAYMENT_IDENTIFIER_REQUIRED");
+  assert.equal(r.http, 400);
+  assert.deepEqual(contadores, { verify: 0, motor: 0, settle: 0 });
 });
 
-// LA IMPORTANTE DE LAS TRES. Un 504 del facilitador significa que la peticion SI
-// salio y puede haberse ejecutado. "No se" no es "no". La reclamacion se queda
-// puesta aunque eso deje el identificador ocupado: reintentar y liquidar dos
-// veces es mucho peor que hacer esperar al cliente hasta que caduque la ventana.
-test("si la liquidacion es INCIERTA, la reclamacion NO se suelta", async () => {
-  const { env } = entorno();
-  const f = facilitador({ settle: "no_se" });
-  try {
-    const r = await cobrar(env);
-    assert.equal(r.tipo, "ok");
-    assert.equal(r.estadoLiquidacion, "unconfirmed");
-    assert.equal(cuantasIdem(env.DB), 1);
-    assert.equal(filaIdem(env.DB, ID).status, "done", "una liquidacion incierta no puede dejar la fila en vuelo");
-  } finally { f.restaurar(); }
+test("PR-2: schema-005 migra filas anteriores como completadas", () => {
+  const DB = baseReal(["schema-004-idempotencia.sql"]);
+  DB._sqlite.prepare(
+    `INSERT INTO payment_idempotency
+       (payment_id, fingerprint, response_json, http_status,
+        transaction_hash, created_at, expires_at)
+     VALUES (?,?,?,?,?,?,?)`
+  ).run(
+    ID, "huella-anterior", '{"verdict":"YES"}', 200, TX,
+    "2026-09-01T00:00:00.000Z", "2026-09-02T00:00:00.000Z"
+  );
+
+  aplicarEsquema(DB, "schema-005-puerta-idempotencia.sql");
+  const fila = filaIdem(DB, ID);
+  assert.equal(fila.gate_state, "completed");
+  assert.equal(fila.attempt_id, null);
 });
 
-// Un modelo caido NO llega a ser un error del motor: con una peticion completa
-// el motor devuelve UNKNOWN, que no se liquida y por tanto no cuesta nada. Se
-// deja escrito porque es facil suponer lo contrario.
-test("un modelo caido acaba en UNKNOWN, no se liquida, y la fila queda cerrada", async () => {
-  const { env } = entorno({ AI: { run: async () => { throw new Error("modelo caido"); } } });
-  const f = facilitador();
-  try {
-    const r = await cobrar(env);
-    assert.equal(r.tipo, "ok");
-    assert.equal(JSON.parse(r.cuerpo).verdict, "UNKNOWN");
-    assert.equal(r.coste, 0);
-    assert.equal(f.settle, 0, "un UNKNOWN no se liquida");
-    assert.equal(filaIdem(env.DB, ID).status, "done");
-  } finally { f.restaurar(); }
+test("PR-2: el esquema rechaza una puerta activa sin propietaria", () => {
+  const DB = baseReal();
+  assert.throws(() => DB._sqlite.prepare(
+    `INSERT INTO payment_idempotency
+       (payment_id, fingerprint, response_json, http_status,
+        created_at, expires_at, gate_state)
+     VALUES (?,?,?,?,?,?,?)`
+  ).run(
+    ID, "h", "pendiente", 0,
+    "2026-09-21T00:00:00.000Z", "2026-09-22T00:00:00.000Z", "claimed"
+  ), /RC_PAYMENT_GATE_OWNER_REQUIRED/);
 });
 
-// ---------------------------------------------------------------------------
-// 4. Mismo identificador, OTRA pregunta: 409, y sin liquidar. (W31 intacto.)
-// ---------------------------------------------------------------------------
+test("PR-2: una propietaria antigua no puede preparar, completar ni liberar el intento nuevo", async () => {
+  const DB = baseReal();
+  const h = await huella({ aceptado: ACEPTADO, ruta: "/v1/check", cuerpo: PETICION_CRUDA });
+  const primera = await reclamar(
+    { DB, IDEMPOTENCY_HOURS: 1 }, { id: ID, huella: h },
+    "2026-09-21T00:00:00.000Z", "intento-antiguo"
+  );
+  assert.equal(primera.propietaria, true);
 
-test("mismo identificador con otra pregunta sigue siendo conflicto, y no liquida", async () => {
-  const { env } = entorno();
-  const f = facilitador();
-  try {
-    const primera = await cobrar(env);
-    assert.equal(primera.tipo, "ok");
-    assert.equal(f.settle, 1);
+  const segunda = await reclamar(
+    { DB, IDEMPOTENCY_HOURS: 1 }, { id: ID, huella: h },
+    "2026-09-21T02:00:00.000Z", "intento-nuevo"
+  );
+  assert.deepEqual(segunda, { propietaria: true, attemptId: "intento-nuevo" });
 
-    const otra = { ...PETICION, product_url: "https://eval.example/p/OTRO-PRODUCTO" };
-    const segunda = await cobrar(env, otra);
-    assert.equal(segunda.tipo, "conflicto");
-    assert.equal(f.settle, 1, "un conflicto no puede liquidar");
-    assert.equal(cuantasIdem(env.DB), 1);
-  } finally { f.restaurar(); }
+  assert.equal(await prepararLiquidacion({ DB }, {
+    id: ID, huella: h, attemptId: "intento-antiguo", cuerpo: { verdict: "YES" },
+  }), false);
+  assert.equal(await completar({ DB }, {
+    id: ID, huella: h, attemptId: "intento-antiguo", cuerpo: { verdict: "YES" },
+    estadoLiquidacion: "confirmed",
+  }), false);
+  assert.equal(await liberar({ DB }, {
+    id: ID, huella: h, attemptId: "intento-antiguo",
+  }), false);
+  assert.equal(filaIdem(DB, ID).attempt_id, "intento-nuevo");
 });
 
-// ---------------------------------------------------------------------------
-// 5. Una reclamacion colgada no bloquea el identificador para siempre — pero
-//    tampoco se le quita a una peticion que sigue viva.
-// ---------------------------------------------------------------------------
+test("PR-2: una fila settling no se recicla por antigüedad", async () => {
+  const DB = baseReal();
+  const h = await huella({ aceptado: ACEPTADO, ruta: "/v1/check", cuerpo: PETICION_CRUDA });
+  await reclamar(
+    { DB, IDEMPOTENCY_HOURS: 1 }, { id: ID, huella: h },
+    "2026-09-21T00:00:00.000Z", "intento-1"
+  );
+  assert.equal(await prepararLiquidacion({ DB }, {
+    id: ID, huella: h, attemptId: "intento-1", cuerpo: { verdict: "YES" },
+  }, "2026-09-21T00:10:00.000Z"), true);
 
-test("una reclamacion viva NO se le quita a nadie", async () => {
-  const env = { DB: baseReal(), IDEMPOTENCY_HOURS: 24 };
-  const h = await huella({ aceptado: ACEPTADO, metodo: "POST", ruta: RUTA, cuerpo: PETICION });
-  await reclamar(env, { id: ID, huella: h });
-  // Ventana de dos minutos, reclamacion de hace un instante.
-  assert.deepEqual(await reclamar(env, { id: ID, huella: h }), { enCurso: true });
+  const mientrasLiquida = await reclamar(
+    { DB, IDEMPOTENCY_HOURS: 1 }, { id: ID, huella: h },
+    "2026-09-21T00:10:30.000Z", "intento-2"
+  );
+  assert.equal(mientrasLiquida.enCurso, true);
+
+  const posterior = await reclamar(
+    { DB, IDEMPOTENCY_HOURS: 1 }, { id: ID, huella: h },
+    "2026-09-22T00:00:00.000Z", "intento-2"
+  );
+  assert.equal(posterior.repetido, true);
+  assert.equal(posterior.estadoLiquidacion, "unconfirmed");
+  assert.equal(filaIdem(DB, ID).attempt_id, "intento-1");
 });
 
-test("una reclamacion colgada se puede retomar pasada la ventana", async () => {
-  const env = { DB: baseReal(), IDEMPOTENCY_HOURS: 24 };
-  const h = await huella({ aceptado: ACEPTADO, metodo: "POST", ruta: RUTA, cuerpo: PETICION });
-  const hace5min = new Date(Date.now() - 5 * 60000).toISOString();
-  await reclamar(env, { id: ID, huella: h }, hace5min);
-  assert.equal(filaIdem(env.DB, ID).claimed_at, hace5min);
+test("PR-2: el replay HTTP incierto omite PAYMENT-RESPONSE", async () => {
+  const contadores = { verify: 0, motor: 0, settle: 0 };
+  const entorno = env(baseReal(), contadores);
+  const v = validateRequest(PETICION_CRUDA);
+  const h = await huella({
+    aceptado: ACEPTADO, metodo: "POST", ruta: "/v1/check", cuerpo: v.value,
+  });
+  const propietario = await reclamar(entorno, { id: ID, huella: h });
+  await completar(entorno, {
+    id: ID, huella: h, attemptId: propietario.attemptId,
+    cuerpo: { schema_version: "1.0", verdict: "YES" },
+    transaccion: TX, estadoLiquidacion: "pending",
+  });
 
-  // Ahora, con la ventana por defecto de dos minutos, ya se puede retomar.
-  assert.deepEqual(await reclamar(env, { id: ID, huella: h }), { dueno: true });
-  assert.equal(cuantasIdem(env.DB), 1, "retomar no puede crear una segunda fila");
-});
+  const respuesta = await worker.fetch(new Request("https://rc.example/v1/check", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "PAYMENT-SIGNATURE": meterEnSobre(pago()),
+    },
+    body: JSON.stringify(PETICION_CRUDA),
+  }), entorno);
 
-test("una reclamacion colgada NO se retoma si la pregunta es otra: sigue siendo conflicto", async () => {
-  const env = { DB: baseReal(), IDEMPOTENCY_HOURS: 24 };
-  const h = await huella({ aceptado: ACEPTADO, metodo: "POST", ruta: RUTA, cuerpo: PETICION });
-  const otraH = await huella({ aceptado: ACEPTADO, metodo: "POST", ruta: RUTA, cuerpo: { ...PETICION, product_url: "https://x.example/otro" } });
-  await reclamar(env, { id: ID, huella: h }, new Date(Date.now() - 5 * 60000).toISOString());
-  assert.deepEqual(await reclamar(env, { id: ID, huella: otraH }), { conflicto: true });
-});
-
-// ---------------------------------------------------------------------------
-// Cierre y liberacion: que hagan exactamente lo que dicen.
-// ---------------------------------------------------------------------------
-
-test("finalizar solo cierra NUESTRA fila, y liberar solo suelta una en vuelo", async () => {
-  const env = { DB: baseReal(), IDEMPOTENCY_HOURS: 24 };
-  const h = await huella({ aceptado: ACEPTADO, metodo: "POST", ruta: RUTA, cuerpo: PETICION });
-
-  await reclamar(env, { id: ID, huella: h });
-  assert.equal(await finalizar(env, { id: ID, cuerpo: '{"ok":true}', transaccion: TX }), true);
-  assert.equal(filaIdem(env.DB, ID).status, "done");
-
-  // Ya cerrada: ni se vuelve a cerrar ni se puede soltar. Una respuesta servida
-  // no se borra por un `liberar` despistado.
-  assert.equal(await finalizar(env, { id: ID, cuerpo: '{"ok":false}' }), false);
-  assert.equal(await liberar(env, ID), false);
-  assert.equal(filaIdem(env.DB, ID).response_json, '{"ok":true}');
+  assert.equal(respuesta.status, 200);
+  assert.equal(respuesta.headers.get("X-ReturnCheck-Settlement"), "pending");
+  assert.equal(respuesta.headers.get("PAYMENT-RESPONSE"), null);
+  assert.deepEqual(contadores, { verify: 0, motor: 0, settle: 0 });
 });
