@@ -882,14 +882,25 @@ async function handleCheckX402(request, env) {
     return errorResponse("CONFLICT",
       "This payment identifier was already used for a different request.", 409);
 
+  if (r.tipo === "en_curso")
+    return errorResponse("PAYMENT_IN_FLIGHT",
+      "Another request owns this payment identifier and is still processing.", 409);
+
   if (r.tipo === "repetido") {
     const cabeceras = {
       "content-type": "application/json; charset=utf-8",
       "access-control-allow-origin": "*",
       "X-ReturnCheck-Replay": "true",     // no se ha vuelto a cobrar
       "X-ReturnCheck-Cost": "0.0000",
+      "X-ReturnCheck-Settlement":
+        ["pending", "unconfirmed"].includes(r.estadoLiquidacion)
+          ? r.estadoLiquidacion
+          : "replay",
     };
-    if (r.transaccion)
+    // Un replay incierto conserva el estado propio, pero no fabrica un
+    // SettlementResponse binario. Solo confirmado (o una fila historica que ya
+    // era un replay con hash) puede emitir PAYMENT-RESPONSE.
+    if (r.transaccion && ["confirmed", "replay"].includes(r.estadoLiquidacion))
       cabeceras["PAYMENT-RESPONSE"] = cabeceraLiquidacion({
         success: true, transaction: r.transaccion, network: aceptado.network, payer: null });
     return new Response(r.cuerpo, { status: r.estado, headers: cabeceras });

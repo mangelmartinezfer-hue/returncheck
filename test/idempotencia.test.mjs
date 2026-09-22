@@ -6,7 +6,10 @@
 // la defensiva alrededor nuestro, o se va.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { leerIdentificador, canonico, huella, consultar, guardar, purgarCaducados } from "../src/idempotencia.mjs";
+import {
+  leerIdentificador, canonico, huella, consultar, guardar, purgarCaducados,
+  reclamar, prepararLiquidacion, completar, liberar,
+} from "../src/idempotencia.mjs";
 
 function db() {
   const filas = new Map();
@@ -17,14 +20,63 @@ function db() {
         first: async () => filas.get(a[0]) || null,
         run: async () => {
           const s = sql.replace(/\s+/g, " ").trim();
-          if (s.startsWith("INSERT OR REPLACE INTO payment_idempotency")) {
+          if (s.startsWith("INSERT INTO payment_idempotency") && s.includes("gate_state")) {
+            const anterior = filas.get(a[0]);
+            const puedeReclamar = !anterior ||
+              (anterior.expires_at <= a[5] && (
+                anterior.gate_state === "claimed" ||
+                (anterior.gate_state === "completed" && !anterior.transaction_hash &&
+                  [null, undefined, "not_charged"].includes(anterior.settlement_state))
+              ));
+            if (!puedeReclamar) return { meta: { changes: 0 } };
+            filas.set(a[0], {
+              payment_id: a[0], fingerprint: a[1], response_json: a[2],
+              http_status: a[3], transaction_hash: a[4], created_at: a[5],
+              expires_at: a[6], gate_state: a[7], attempt_id: a[8],
+              settlement_state: a[9], updated_at: a[10],
+            });
+            return { meta: { changes: 1 } };
+          }
+          if (s.startsWith("INSERT INTO payment_idempotency")) {
+            if (filas.has(a[0])) return { meta: { changes: 0 } };
             filas.set(a[0], { payment_id: a[0], fingerprint: a[1], response_json: a[2],
-                              http_status: a[3], transaction_hash: a[4], created_at: a[5], expires_at: a[6] });
+                              http_status: a[3], transaction_hash: a[4], created_at: a[5],
+                              expires_at: a[6], gate_state: "completed" });
+            return { meta: { changes: 1 } };
+          }
+          if (s.startsWith("UPDATE payment_idempotency") && s.includes("gate_state = 'settling'")) {
+            const fila = filas.get(a[3]);
+            if (!fila || fila.fingerprint !== a[4] || fila.attempt_id !== a[5] || fila.gate_state !== "claimed")
+              return { meta: { changes: 0 } };
+            Object.assign(fila, { gate_state: "settling", response_json: a[0], http_status: a[1],
+                                  settlement_state: "unconfirmed", updated_at: a[2] });
+            return { meta: { changes: 1 } };
+          }
+          if (s.startsWith("UPDATE payment_idempotency") && s.includes("gate_state = 'completed'")) {
+            const fila = filas.get(a[5]);
+            if (!fila || fila.fingerprint !== a[6] || fila.attempt_id !== a[7] ||
+                !["claimed", "settling"].includes(fila.gate_state))
+              return { meta: { changes: 0 } };
+            Object.assign(fila, { gate_state: "completed", response_json: a[0], http_status: a[1],
+                                  transaction_hash: a[2], settlement_state: a[3], updated_at: a[4] });
             return { meta: { changes: 1 } };
           }
           if (s.startsWith("DELETE FROM payment_idempotency")) {
+            if (s.includes("attempt_id")) {
+              const fila = filas.get(a[0]);
+              if (!fila || fila.fingerprint !== a[1] || fila.attempt_id !== a[2] ||
+                  fila.gate_state !== "claimed")
+                return { meta: { changes: 0 } };
+              filas.delete(a[0]);
+              return { meta: { changes: 1 } };
+            }
             let n = 0;
-            for (const [k, v] of filas) if (v.expires_at <= a[0]) { filas.delete(k); n++; }
+            for (const [k, v] of filas)
+              if (v.expires_at <= a[0] && (
+                v.gate_state === "claimed" ||
+                (v.gate_state === "completed" && !v.transaction_hash &&
+                  [null, undefined, "not_charged"].includes(v.settlement_state))
+              )) { filas.delete(k); n++; }
             return { meta: { changes: n } };
           }
           return { meta: { changes: 0 } };
@@ -48,8 +100,9 @@ test("identificador: se lee del sitio que dice la extensión", () => {
   assert.equal(leerIdentificador(pago), ID);
 });
 
-test("identificador inválido se IGNORA, no rompe la petición", () => {
-  // El cliente pierde la proteccion de idempotencia; no pierde el servicio.
+test("un identificador ausente o invalido no produce una identidad util", () => {
+  // leerIdentificador solo extrae. El camino pagado lo convierte en un 400:
+  // sin identidad estable no existe una puerta monetaria.
   assert.equal(leerIdentificador({ payload: { extensions: { "payment-identifier": "corto" } } }), null);
   assert.equal(leerIdentificador({ payload: { extensions: { "payment-identifier": "tiene espacios aqui!!" } } }), null);
   assert.equal(leerIdentificador({ payload: { extensions: { "payment-identifier": 12345 } } }), null);
@@ -145,12 +198,57 @@ test("sin identificador no se guarda ni se consulta nada", async () => {
   assert.equal(DB._f.size, 0);
 });
 
-test("si la base falla, la consulta SIGUE: se pierde la protección, no el servicio", async () => {
-  // Perder la idempotencia es malo. Tumbar una consulta que el cliente esta
-  // pagando es peor.
+test("los auxiliares historicos no lanzan si falla la base", async () => {
+  // La puerta PR-2 usa `reclamar`, que sí falla cerrado; estos auxiliares se
+  // conservan para compatibilidad y no conceden permiso monetario.
   const rota = { DB: { prepare: () => { throw new Error("base caida"); } } };
   assert.equal(await consultar(rota, ID, "h"), null);
   assert.equal(await guardar(rota, { id: ID, huella: "h", cuerpo: {} }), false);
+});
+
+test("PR-2: solo changes===1 concede la propiedad de la puerta", async () => {
+  const DB = db();
+  const primero = await reclamar({ DB }, { id: ID, huella: "h" }, "2026-09-21T00:00:00.000Z", "intento-1");
+  const segundo = await reclamar({ DB }, { id: ID, huella: "h" }, "2026-09-21T00:00:01.000Z", "intento-2");
+  assert.deepEqual(primero, { propietaria: true, attemptId: "intento-1" });
+  assert.equal(segundo.enCurso, true);
+});
+
+test("PR-2: una excepción o changes ausente es error, nunca permiso ni derrota normal", async () => {
+  const rota = { DB: { prepare: () => { throw new Error("base caida"); } } };
+  assert.equal((await reclamar(rota, { id: ID, huella: "h" })).error, true);
+
+  const sinChanges = { DB: { prepare: () => ({ bind: () => ({ run: async () => ({ meta: {} }) }) }) } };
+  assert.equal((await reclamar(sinChanges, { id: ID, huella: "h" })).error, true);
+});
+
+test("PR-2: el resultado queda persistido antes de liquidar y luego se cierra", async () => {
+  const DB = db();
+  const p = await reclamar({ DB }, { id: ID, huella: "h" }, "2026-09-21T00:00:00.000Z", "intento-1");
+  assert.equal(await prepararLiquidacion({ DB }, {
+    id: ID, huella: "h", attemptId: p.attemptId, cuerpo: { verdict: "YES" },
+  }), true);
+
+  const durante = await consultar({ DB }, ID, "h");
+  assert.equal(durante.enCurso, true, "no entrega antes de conocer el desenlace de /settle");
+
+  assert.equal(await completar({ DB }, {
+    id: ID, huella: "h", attemptId: p.attemptId, cuerpo: { verdict: "YES" },
+    transaccion: "0xabc", estadoLiquidacion: "confirmed",
+  }), true);
+  const final = await consultar({ DB }, ID, "h");
+  assert.equal(final.transaccion, "0xabc");
+  assert.equal(final.estadoLiquidacion, "confirmed");
+});
+
+test("PR-2: solo la propietaria puede completar o liberar", async () => {
+  const DB = db();
+  await reclamar({ DB }, { id: ID, huella: "h" }, "2026-09-21T00:00:00.000Z", "intento-1");
+  assert.equal(await completar({ DB }, {
+    id: ID, huella: "h", attemptId: "intruso", cuerpo: {},
+  }), false);
+  assert.equal(await liberar({ DB }, { id: ID, huella: "h", attemptId: "intruso" }), false);
+  assert.equal(await liberar({ DB }, { id: ID, huella: "h", attemptId: "intento-1" }), true);
 });
 
 test("barrido de caducados", async () => {

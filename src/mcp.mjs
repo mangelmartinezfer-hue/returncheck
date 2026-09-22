@@ -275,8 +275,26 @@ const LIQUIDACION_REAL = new Set(["confirmed", "pending", "unconfirmed", "replay
  * Devuelve null cuando no hay liquidacion real: gratis, reto y UNKNOWN no pasan
  * por aqui, y esa ausencia es la regla de arriba hecha codigo.
  */
-export function evidenciaDePago({ estado, cabecera, coste }) {
-  if (!LIQUIDACION_REAL.has(estado) || !cabecera) return null;
+export function evidenciaDePago({ estado, cabecera, coste, transaccion = null }) {
+  if (!LIQUIDACION_REAL.has(estado)) return null;
+
+  // En un replay incierto conocemos el estado durable pero no conservamos un
+  // SettlementResponse completo. Se publica solo nuestro bloque ternario; no se
+  // reconstruye un sobre estandar con datos ausentes.
+  if (!cabecera && ["pending", "unconfirmed"].includes(estado)) {
+    return {
+      bloque: {
+        settlement: estado,
+        transaction: transaccion || null,
+        network: null,
+        payer: null,
+        cost_usd: Number(coste || 0).toFixed(4),
+        payment_response: null,
+      },
+      settlement: null,
+    };
+  }
+  if (!cabecera) return null;
   const sobre = sacarDelSobre(cabecera) || {};
 
   // W51 — LA INVARIANTE, COMPROBADA AQUI Y NO SUPUESTA.
@@ -436,22 +454,27 @@ async function pagarConX402(args, env, request, vehiculos) {
   if (r.tipo === "conflicto")
     return toolText("This payment identifier was already used for a different request.", true);
 
-  // Reintento: se devuelve lo ya servido y NO se ha vuelto a cobrar. La
-  // liquidacion existio —fue la del cobro original— asi que la prueba se
-  // devuelve igual, con su transaccion y coste 0. Es lo mismo que hace HTTP, que
-  // en este caso manda PAYMENT-RESPONSE junto a X-ReturnCheck-Cost: 0.0000.
+  if (r.tipo === "en_curso")
+    return toolText("Another request owns this payment identifier and is still processing. Retry the query; no second settlement was started.", true);
+
+  // Reintento: se devuelve lo ya servido y NO se ha vuelto a cobrar. Si la
+  // liquidacion original fue confirmada se conserva su hash; si quedó pendiente
+  // o incierta solo se publica nuestro estado ternario, nunca se fabrica el
+  // objeto estandar que solo sabe decir exito o fallo.
   if (r.tipo === "repetido") {
     let resp = null;
     try { resp = JSON.parse(r.cuerpo); } catch (_) { resp = null; }
     if (!resp) return toolText("Replay of a previous paid call, but the stored answer could not be read.", true);
-    const ev = r.transaccion
+    const estado = r.estadoLiquidacion || "replay";
+    const confirmado = ["confirmed", "replay"].includes(estado);
+    const ev = confirmado && r.transaccion
       ? evidenciaDePago({
           estado: "replay",
           cabecera: cabeceraLiquidacion({
             success: true, transaction: r.transaccion, network: aceptado.network, payer: null }),
           coste: 0,
         })
-      : null;
+      : evidenciaDePago({ estado, cabecera: null, coste: 0, transaccion: r.transaccion });
     return resultadoConPago(resp, ev);
   }
 

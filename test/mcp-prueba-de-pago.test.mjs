@@ -17,11 +17,13 @@ import worker from "../src/index.mjs";
 import { meterEnSobre, sacarDelSobre } from "../src/x402.mjs";
 import { validateRequest } from "../src/contract.mjs";
 import { huella } from "../src/idempotencia.mjs";
+import { dbPuerta as db } from "./dobles/db-puerta.mjs";
 
 const PAY_TO = "0xbF428071027402E9b0cE85e22146EDdc028cEB3b";
 const ASSET  = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const RED    = "eip155:8453";
 const TX     = "0xdeadbeefcafe0000000000000000000000000000000000000000000000000001";
+const ID_POR_DEFECTO = "returncheck-test-payment-0001";
 
 const POLIZA = "Northstar Retail accepts returns of standard merchandise within 30 calendar days after delivery. Items must be unopened and include all original accessories.";
 
@@ -55,25 +57,6 @@ function ia(verdict) {
   }) }) };
 }
 
-// Base de mentira. Sabe contestar lo justo: los contadores del tramo gratis y,
-// si se le pide, una fila de idempotencia ya guardada.
-function db({ idemFila = null } = {}) {
-  const generico = {
-    run: async () => ({ meta: { changes: 0 } }),
-    first: async () => null,
-    all: async () => ({ results: [] }),
-  };
-  return {
-    prepare: (sql) => ({
-      bind: () => ({
-        ...generico,
-        first: async () => (idemFila && /FROM payment_idempotency/.test(sql)) ? idemFila : null,
-      }),
-      ...generico,
-    }),
-  };
-}
-
 const ENV_BASE = {
   PUBLIC_BASE_URL: "https://rc.example",
   PRICE_USD: "0.02",
@@ -97,7 +80,7 @@ async function llamar(env, args = {}) {
   return (await r.json()).result;
 }
 
-function sobreDePago({ amount = "20000", id = null } = {}) {
+function sobreDePago({ amount = "20000", id = ID_POR_DEFECTO } = {}) {
   const payload = { signature: "0xsig", authorization: { from: "0x857bEEF0000000000000000000000000000000aa" } };
   if (id) payload.extensions = { "payment-identifier": id };
   return meterEnSobre({
