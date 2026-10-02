@@ -7,6 +7,9 @@ const CALENDAR_DAYS_RE = /\bwithin\s+(\d{1,3})\s+(?:calendar\s+)?days?\b/i;
 
 export function windowBasisFromClause(clause) {
   if (!clause) return null;
+  // A proof/receipt/order confirmation is a document, not the start of a window.
+  // Preserve real temporal language elsewhere in the same clause.
+  clause = clause.replace(/\b(?:proof|evidence|confirmation)\s+of\s+(?:purchase|order|delivery|receipt)\b/gi, "document");
   const purchase = PURCHASE_BASIS_RE.test(clause);
   const delivery = DELIVERY_BASIS_RE.test(clause);
   if (purchase === delivery) return null; // ninguna señal o cláusula ambigua

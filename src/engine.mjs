@@ -18,6 +18,7 @@ import { extractLdBlocks, findReturnPolicy, verdictFromCategory } from "./jsonld
 import { recordCheck } from "./metrics.mjs";
 import { capturePolicy, recordCorpusUse } from "./corpus.mjs";
 import { recordAnswer } from "./answerlog.mjs";
+import { recoverOpenedBranch } from "./condition-branch.mjs";
 
 class EngineError extends Error {
   constructor(code, http, message) { super(message); this.code = code; this.http = http; }
@@ -192,6 +193,7 @@ async function extract(env, policyText, req) {
 
   const userMsg =
     `PRODUCT_URL: ${req.product_url}\n` +
+    `SUPPLIED_PAGE_SOURCE_URL: ${req.page_source_url || req.product_url} (caller-declared when content is supplied)\n` +
     `REQUEST: ${JSON.stringify({ buyer_country: req.buyer_country, item_condition: req.item_condition || null, reason: req.reason || null, membership: req.membership || null, purchase_channel: req.purchase_channel || null })}\n` +
     `TODAY: ${todayDate()}\n` +
     `POLICY TEXT:\n${policyText}\n\n` +
@@ -266,6 +268,15 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
   if (!("country" in merchant)) merchant.country = req.buyer_country || null;
 
   const determinate = ["YES", "YES_WITH_CONDITIONS", "NO"].includes(ai.verdict);
+
+  // Do not publish metadata contradicting the positive clause/request.
+  if (["YES", "YES_WITH_CONDITIONS"].includes(ai.verdict) && ai.policy && ai.evidence) {
+    if (clausePositiveButUnverifiedForOpenedItem(ai.evidence.exact_clause, "opened") &&
+        !/\b(?:open|opened|used|worn)\b/i.test(ai.evidence.exact_clause)) {
+      ai.policy.item_conditions_accepted = ["NewCondition"];
+    }
+    if (req.reason) ai.policy.exceptions = (ai.policy.exceptions || []).filter(tag => tag !== req.reason);
+  }
 
   // Hallazgo A (doc 65) — la cita manda sobre el número que dio el modelo. Si la
   // ventana de la cita contiene EXACTAMENTE una cifra de días, esa cifra
@@ -653,14 +664,15 @@ export async function runCheck(env, req) {
   };
 
   // 3a) Datos estructurados en la página (fundamentado, sin IA).
-  const fromProduct = await tryJsonLd(prodHtml, req.product_url,
+  const suppliedSource = agentSupplied && req.page_source_url ? req.page_source_url : req.product_url;
+  const fromProduct = await tryJsonLd(prodHtml, suppliedSource,
     agentSupplied ? "agent_supplied_jsonld" : "structured_data_jsonld");
   if (fromProduct) return fromProduct;
 
   // 3b) COBERTURA: si la página de producto no trae política clara, buscar la página
   // de devoluciones dedicada de la tienda y leerla. Convierte UNKNOWNs en respuestas.
   // (Solo cuando leemos nosotros: si el agente aportó la página, no salimos a la red.)
-  let policyText = prodText, sourceUrl = req.product_url, checked_via = via, discovered_url = null;
+  let policyText = prodText, sourceUrl = suppliedSource, checked_via = via, discovered_url = null;
   if (!agentSupplied && policyKeywordHits(prodText) < WEAK_POLICY_HITS) {
     const found = await discoverPolicyPage(env, req.product_url, prodHtml);
     if (found) {
@@ -709,8 +721,10 @@ export async function runCheck(env, req) {
   }
 
   // 4) Ensamblar + invariantes
+  const condition_branch_recovered = recoverOpenedBranch(ai, req, policyText);
   const meta = { cache_hit: false, response_ms: Date.now() - t0, checked_via, fetch_ms, ai_ms, policy_chars: policyText.length,
                  clause_from_candidate };
+  if (condition_branch_recovered) meta.condition_branch_recovered = true;
   if (discovered_url) meta.discovered_policy_url = discovered_url;
   const resp = await assemble(ai, req, policyText, meta, sourceUrl);
 

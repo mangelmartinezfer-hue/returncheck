@@ -729,6 +729,7 @@ function openapi(env) {
             purchase_channel: { type: "string", enum: ["online", "store", "phone", "marketplace"], description: "Optional: where the purchase was made, for policies with channel-conditional terms." },
             page_text: { type: "string", description: "RECOMMENDED. Plain text of the product or returns page you already have open. We verify against this instead of fetching: works on any store, no blocking, no JavaScript problem, and faster. Measured 2026-08-28: without it we reach the policy for 17 of 50 US retailers. Max 4,000,000 chars." },
             page_html: { type: "string", description: "RECOMMENDED (alternative to page_text). Raw HTML of the same page; lets us also read structured data (JSON-LD). Max 4,000,000 chars." },
+            page_source_url: { type: "string", description: "URL of supplied page_text/page_html if different from product_url. Caller-declared provenance, not independently fetched." },
           },
         },
       },

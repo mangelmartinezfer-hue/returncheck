@@ -42,6 +42,15 @@ If you already have the product/policy page rendered, pass it as `page_html` or
 `page_text` — ReturnCheck verifies against it and skips fetching (best coverage,
 bypasses sites that block server-side reads). It still never invents.
 
+When that content comes from a separate policy page, also send `page_source_url`
+with its HTTP(S) URL. This preserves the supplied source in `evidence.source_url`
+and the corpus while keeping `product_url` as the product context. The URL is
+caller-declared and is not independently fetched. Without it, the existing
+`product_url` fallback remains; legacy callers should add the field when supplying
+a different page. Opened-product alternatives are recovered only for an explicit
+adjacent generic clause; ambiguous, category-specific or conflicting terms still
+require the normal verification path.
+
 ## What you get back
 
 ```json

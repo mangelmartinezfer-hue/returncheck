@@ -52,6 +52,7 @@ export const TOOL = {
       seller_name: { type: "string" },
       page_text: { type: "string", description: "RECOMMENDED. Plain text of the product or returns page you already have open. We verify against this instead of fetching: works on any store, no blocking, no JavaScript problem, and faster. Still never invents: no verifiable clause -> UNKNOWN (free)." },
       page_html: { type: "string", description: "RECOMMENDED (alternative to page_text). Raw HTML of the same page. Slightly better than page_text: we can also read structured data (JSON-LD) from it." },
+      page_source_url: { type: "string", description: "URL of the supplied page_text/page_html when different from product_url. Caller-declared provenance; not independently fetched." },
       // W48 — PAGO SIN CUENTA, POR AQUI DENTRO.
       //
       // MCP va sobre JSON-RPC y ahi no hay cabeceras: la cabecera

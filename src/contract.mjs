@@ -12,7 +12,7 @@ export function validateRequest(body) {
     return { ok: false, code: "INVALID_INPUT", message: "Body must be a JSON object." };
 
   const { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name,
-          buyer_state, as_of, page_html, page_text, membership, purchase_channel } = body;
+          buyer_state, as_of, page_html, page_text, page_source_url, membership, purchase_channel } = body;
 
   if (typeof product_url !== "string" || !/^https?:\/\//i.test(product_url))
     return { ok: false, code: "INVALID_INPUT", message: "product_url is required and must be an http(s) URL." };
@@ -64,7 +64,16 @@ export function validateRequest(body) {
   if (page_text !== undefined && (typeof page_text !== "string" || page_text.length > MAX_PAGE))
     return { ok: false, code: "INVALID_INPUT", message: "page_text must be a string under 4,000,000 chars." };
 
-  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name, buyer_state, as_of, page_html, page_text, membership, purchase_channel } };
+  if (page_source_url !== undefined) {
+    try {
+      if (typeof page_source_url !== 'string' || !(page_text || page_html)) throw new Error();
+      const source = new URL(page_source_url);
+      if (!['http:', 'https:'].includes(source.protocol) || source.username || source.password) throw new Error();
+    } catch {
+      return { ok: false, code: 'INVALID_INPUT', message: 'page_source_url must be an http(s) URL without credentials, with page_text or page_html.' };
+    }
+  }
+  return { ok: true, value: { product_url, buyer_country, merchant, item_condition, purchase_date, delivery_date, reason, seller_name, buyer_state, as_of, page_html, page_text, page_source_url, membership, purchase_channel } };
 }
 
 // Invariantes del contrato (sección 7). Defensa antes de responder: si el motor
