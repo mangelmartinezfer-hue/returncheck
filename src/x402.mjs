@@ -31,6 +31,8 @@
 // el flujo esté probado en la red de pruebas. Mientras, nada de esto se activa y
 // el servicio funciona exactamente igual que hoy.
 
+import { paymentExtensions } from "./payment-discovery.mjs";
+
 export const X402_VERSION = 2;
 
 // Redes en formato CAIP-2, que es lo que cambió de la v1 a la v2. "base-sepolia"
@@ -154,6 +156,7 @@ export function retoDePago(env, { url, error = "PAYMENT-SIGNATURE header is requ
     error,
     resource: recursoDePago(env, { url }),
     accepts,
+    extensions: paymentExtensions(url || recursoDePago(env).url),
   };
 }
 
