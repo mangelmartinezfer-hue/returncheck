@@ -28,7 +28,7 @@ export const TOOL = {
   // Se invierte el orden y se publica la cobertura MEDIDA, con su fecha. Es lo
   // mismo que le exigimos al motor: no afirmar mas de lo que sostiene la evidencia.
   description:
-    "Answer one question: can this specific product actually be returned? " +
+    "ReturnCheck verifies which return policy actually applies to this purchase. " +
     "BEST RESULTS: send the product page you already have as page_text (or page_html) " +
     "along with product_url — your browser renders JavaScript and is not blocked by " +
     "retailers, so this works on any store and is faster. Without it we fetch the page " +
