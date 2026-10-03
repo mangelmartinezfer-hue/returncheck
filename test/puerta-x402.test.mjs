@@ -128,6 +128,27 @@ function argumentos(peticion = PETICION_CRUDA, id = ID) {
   return { pago: pago(id), aceptado: ACEPTADO, peticion: v.value, ruta: "/v1/check", precio: "0.02" };
 }
 
+test("discovery: legacy and standard envelopes share a single concurrent settlement gate", async () => {
+  const contadores = { verify: 0, motor: 0, settle: 0 };
+  const entorno = env(baseReal(), contadores);
+  const modern = argumentos();
+  delete modern.pago.payload.extensions;
+  modern.pago.extensions = { "payment-identifier": { info: { required: true, id: ID } } };
+  const results = await conFacilitador(contadores, () => Promise.all([
+    cobrarConX402(entorno, argumentos()), cobrarConX402(entorno, modern),
+  ]));
+  assert.deepEqual(new Set(results.map(r => r.tipo)), new Set(["ok", "repetido"]));
+  assert.deepEqual(contadores, { verify: 1, motor: 1, settle: 1 });
+});
+
+test("discovery: contradictory identifiers fail before touching D1 or facilitator", async () => {
+  const args = argumentos();
+  args.pago.extensions = { "payment-identifier": { info: { id: "another-valid-identifier" } } };
+  const result = await cobrarConX402({ DB: { prepare() { throw new Error("must not run"); } } }, args);
+  assert.equal(result.http, 400);
+  assert.equal(result.code, "PAYMENT_IDENTIFIER_REQUIRED");
+});
+
 test("PR-2: dos peticiones simultaneas producen un solo /settle y una sola ejecucion del motor", async () => {
   const contadores = { verify: 0, motor: 0, settle: 0 };
   const entorno = env(baseReal(), contadores);

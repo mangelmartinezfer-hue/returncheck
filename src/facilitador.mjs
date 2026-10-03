@@ -118,10 +118,12 @@ async function llamar(env, ruta, cuerpo, { fetchImpl = fetch } = {}) {
  */
 export function limpiarParaFacilitador(pago, env = {}) {
   if (String(env.X402_ENVIAR_EXTENSIONES) === "true") return pago;
-  if (!pago || !pago.payload || pago.payload.extensions === undefined) return pago;
+  if (!pago) return pago;
   // Copia: el sobre original NO se toca, que es de donde sale la idempotencia.
+  const { extensions: extensionesV2, ...restoDelSobre } = pago;
+  if (!pago.payload || pago.payload.extensions === undefined) return restoDelSobre;
   const { extensions, ...restoDelPayload } = pago.payload;
-  return { ...pago, payload: restoDelPayload };
+  return { ...restoDelSobre, payload: restoDelPayload };
 }
 
 function cuerpoFacilitador(pago, requisitos, env = {}) {

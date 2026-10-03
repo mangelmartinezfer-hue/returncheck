@@ -27,6 +27,7 @@ import { inferenceParams } from "./prompt.mjs";
 import { sondearTanda, resumir } from "./adquisicion.mjs";
 import { fichaPublicada, paginaFicha, gemeloJson, paginaIndice, indiceJson, sitemap, pagina404 } from "./cards.mjs";
 import { landingPage } from "./landing.mjs";
+import { CHECK_EXAMPLE, PAYMENT_INSTRUCTIONS, paymentExtensions, checkResponses, ERROR_SCHEMA } from "./payment-discovery.mjs";
 
 // Marcador de versión único (se usa en / y en /eval para sellar el volcado).
 
@@ -677,6 +678,8 @@ function wellKnownX402(env) {
     // facilitador. Aqui habia una copia escrita a mano de la descripcion.
     resource: recursoDePago(env),
     accepts,
+    extensions: paymentExtensions(recursoDePago(env).url),
+    payment_instructions: PAYMENT_INSTRUCTIONS,
     // Los DOS sitios donde se puede gastar esa firma. Se listan porque este lote
     // es justamente el que hace pagable el MCP: publicar solo el HTTP dejaria la
     // mitad del trabajo sin anunciar.
@@ -702,15 +705,25 @@ function openapi(env) {
           operationId: "check_return",
           summary: "Can this specific product actually be returned?",
           description: "Returns a verified verdict with the exact policy clause. No API key = limited free trial; with an API key it costs " + Number(env.PRICE_USD || "0.02") + " USD per useful verdict (UNKNOWN is free).",
-          security: [{}, { bearerAuth: [] }],
-          requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/CheckRequest" } } } },
-          responses: { "200": { description: "Verified answer (contract v1.0)." }, "402": { description: "Payment required / free trial exhausted." } },
+          security: [{}, { bearerAuth: [] }, { paymentSignature: [] }],
+          ...(x402Activo(env) && requisitosDePago(env) ? {
+            "x-payment-info": { protocols: ["x402"], price: { mode: "fixed", currency: "USD", amount: String(env.PRICE_USD || "0.02") } },
+            "x-x402": { x402Version: X402_VERSION, accepts: requisitosDePago(env), extensions: paymentExtensions(recursoDePago(env).url), unknown_is_free: true, ...PAYMENT_INSTRUCTIONS },
+          } : {}),
+          requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/CheckRequest" }, example: CHECK_EXAMPLE } } },
+          // Los desenlaces del camino de pago, con su codigo real y su instruccion
+          // de parada, viven en payment-discovery.mjs para no escribirlos dos veces.
+          responses: checkResponses(Boolean(x402Activo(env) && requisitosDePago(env))),
         },
       },
     },
     components: {
-      securitySchemes: { bearerAuth: { type: "http", scheme: "bearer" } },
+      securitySchemes: {
+        bearerAuth: { type: "http", scheme: "bearer" },
+        paymentSignature: { type: "apiKey", in: "header", name: "PAYMENT-SIGNATURE", description: 'Base64 x402 v2 PaymentPayload. Required identifier: extensions["payment-identifier"].info.id. Legacy payload.extensions["payment-identifier"] string remains accepted. Signed calls bypass the free allowance; UNKNOWN is not settled.' },
+      },
       schemas: {
+        Error: ERROR_SCHEMA,
         CheckRequest: {
           type: "object",
           required: ["product_url", "buyer_country"],
@@ -925,6 +938,12 @@ async function handleCheckX402(request, env) {
   });
 }
 
+// Cuerpo ausente o declarado vacio. No se lee el flujo: solo se mira si existe, para
+// no consumirlo y no cambiar nada del camino normal.
+function sinCuerpo(request) {
+  return request.body === null || request.body === undefined || request.headers.get("content-length") === "0";
+}
+
 async function handleCheck(request, env) {
   const price = Number(env.PRICE_USD || "0.02");
   const chargeOnUnknown = String(env.CHARGE_ON_UNKNOWN || "false") === "true";
@@ -934,6 +953,19 @@ async function handleCheck(request, env) {
   // debe gastar su cuota gratuita sin querer.
   if (x402Activo(env) && request.headers.get("PAYMENT-SIGNATURE"))
     return await handleCheckX402(request, env);
+
+  // SONDEO DE DESCUBRIMIENTO, SIN GASTAR CUOTA.
+  // Una peticion sin cuerpo no puede ser una consulta: no hay nada gratis que
+  // servir. Hasta aqui devolvia 400 "Body must be JSON" DESPUES de que freeTrial
+  // hubiera incrementado el contador por IP y el global (bump() sube antes de
+  // decidir), asi que el rastreador gastaba cuota nuestra y seguia sin ver los
+  // terminos: medido, tres accesos a D1 y cero `accepts`. Se responde con el MISMO
+  // reto que el camino de pago y se decide ANTES de freeTrial: cero D1, cero motor,
+  // cero facilitador. No mira cabeceras ni distingue bots: mira si hay cuerpo.
+  if (x402Activo(env) && requisitosDePago(env) && sinCuerpo(request))
+    return reto402(env, request,
+      "Payment terms for POST " + new URL(request.url).pathname +
+      ". A bodyless request is a discovery probe: it does not consume the free allowance and never returns a verdict.");
 
   // 1) Autenticación — o tramo de prueba SIN clave (para agentes autónomos).
   const apiKey = bearer(request);
@@ -1090,6 +1122,14 @@ export default {
     try {
       if (request.method === "POST" && p === "/v1/signup") return await handleSignup(request, env);
       if (request.method === "POST" && (p === "/v1/check" || p === "/v1/check_return")) return await handleCheck(request, env);
+      // El mismo reto para un GET, que tampoco fue nunca una consulta valida (hasta
+      // aqui: 404, medido). Se deja porque un rastreador que no lea el OpenAPI puede
+      // empezar por GET; el gasto de cuota real lo cierra la puerta del POST sin
+      // cuerpo, no esta.
+      if (request.method === "GET" && (p === "/v1/check" || p === "/v1/check_return") && x402Activo(env) && requisitosDePago(env))
+        return reto402(env, request,
+          "Payment terms for POST " + p +
+          ". This GET is a discovery probe: it does not consume the free allowance and never returns a verdict.");
       if (request.method === "GET" && p === "/v1/balance") return await handleBalance(request, env);
       if (request.method === "POST" && p === "/v1/agent/check")
         // W50 — esta nota tambien mentia ("wired but not yet enabled"). Esta ruta

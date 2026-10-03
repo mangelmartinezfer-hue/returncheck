@@ -54,10 +54,14 @@ const HORAS_POR_DEFECTO = 24;
  */
 export function leerIdentificador(pago) {
   try {
-    const ext = pago && pago.payload && pago.payload.extensions;
-    const id = ext && ext["payment-identifier"];
-    if (typeof id !== "string") return null;
-    return ID_RE.test(id) ? id : null;
+    const standard = pago?.extensions?.["payment-identifier"];
+    const legacy = pago?.payload?.extensions?.["payment-identifier"];
+    const id = standard === undefined ? legacy : standard?.info?.id;
+    if (typeof id !== "string" || !ID_RE.test(id)) return null;
+    // Never silently choose between two identities. Keep the already-issued
+    // legacy instructions usable, including retries across the transition.
+    if (legacy !== undefined && legacy !== id) return null;
+    return id;
   } catch (_) { return null; }
 }
 
