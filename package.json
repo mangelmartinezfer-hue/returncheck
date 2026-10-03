@@ -1,7 +1,7 @@
 {
   "name": "returncheck",
   "version": "1.0.0",
-  "description": "ReturnCheck — can this specific product actually be returned? Paid check_return API for shopping agents. US first, global-ready.",
+  "description": "ReturnCheck verifies which return policy actually applies to this purchase. API and MCP tool for shopping agents.",
   "type": "module",
   "private": true,
   "scripts": {
