@@ -143,7 +143,7 @@ export function recursoDePago(env, { url = null } = {}) {
   const base = (env && env.PUBLIC_BASE_URL) || "";
   return {
     url: url || (base ? base + "/v1/check" : "/v1/check"),
-    description: "ReturnCheck — can this specific product actually be returned?",
+    description: "ReturnCheck verifies which return policy actually applies to this purchase.",
     mimeType: "application/json",
   };
 }
