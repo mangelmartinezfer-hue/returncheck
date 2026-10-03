@@ -58,7 +58,7 @@ test("portada: / sirve HTML público con la propuesta y los dos CTA", async () =
   assert.match(r.headers.get("content-type") || "", /text\/html/);
   assert.match(r.headers.get("content-security-policy") || "", /default-src 'none'/);
   const t = await r.text();
-  assert.match(t, /Return decisions your agent can verify/i);
+  assert.match(t, /ReturnCheck verifies which return policy actually applies to this purchase/i);
   assert.match(t, /Request a 2-case sample/i);
   assert.match(t, /\/openapi\.json/);
   assert.match(t, /returncheckteam@gmail\.com/);
