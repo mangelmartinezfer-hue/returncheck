@@ -1,9 +1,9 @@
-# ReturnCheck — Verified return-policy API for AI shopping agents
+# ReturnCheck — Return-policy verification for AI shopping agents
 
 [![Wellknown verified](https://wellknown.network/agents/returncheck/badge.svg)](https://wellknown.network/agents/returncheck)
 
-**Can this specific product actually be returned?** ReturnCheck answers that one
-question for AI shopping agents, with a **verified** verdict — not a guess.
+**ReturnCheck verifies which return policy actually applies to this purchase.**
+For AI shopping agents, it resolves the case with a **verified** verdict — not a guess.
 
 Give it a `product_url` and a `buyer_country` and it returns a verdict
 (`YES` / `YES_WITH_CONDITIONS` / `NO` / `UNKNOWN`) with the **exact policy clause
