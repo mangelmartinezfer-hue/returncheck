@@ -426,6 +426,7 @@ function discoveryDocument(env) {
     data_policy: (env.PUBLIC_BASE_URL || "") + "/data-policy",
     free_trial: String(env.FREE_TRIAL_ENABLED || "false") === "true",
     browser_fallback: String(env.USE_BROWSER || "false") === "true",
+    positioning: "ReturnCheck verifies which return policy actually applies to this purchase.",
     question: "Can this specific product actually be returned?",
     endpoints: { check: "POST /v1/check", signup: "POST /v1/signup", balance: "GET /v1/balance" },
     price_usd_per_call: Number(env.PRICE_USD || "0.02"),
@@ -522,9 +523,10 @@ export function llmsTxt(env) {
   const body =
 `# ReturnCheck
 
-> Can this specific product actually be returned? ReturnCheck gives AI shopping
-> agents a verified verdict (YES / YES_WITH_CONDITIONS / NO / UNKNOWN) with the
-> exact policy clause quoted verbatim, source URL, return window and confidence.
+> ReturnCheck verifies which return policy actually applies to this purchase.
+> It gives AI shopping agents a verified verdict (YES / YES_WITH_CONDITIONS /
+> NO / UNKNOWN) with the exact policy clause quoted verbatim, source URL,
+> return window and confidence.
 > It never invents: if it cannot verify a clause on the page, it returns UNKNOWN.
 
 ## Use it
@@ -595,8 +597,8 @@ export function aiPluginJson(env) {
     name_for_model: "return_check",
     name_for_human: "ReturnCheck",
     description_for_model:
-      "Check whether a specific product can actually be returned. Call check_return with product_url, buyer_country (ISO alpha-2) and — strongly recommended — page_text or page_html of the page you already have open. Your browser renders JavaScript and is not blocked by retailers; ours is. Measured 2026-08-28 on 50 US retailers: sending the page works on any store, while letting us fetch it reaches the policy for 17 of 50 (34%), mostly Shopify and direct-to-consumer brands. Returns a verified verdict (YES / YES_WITH_CONDITIONS / NO / UNKNOWN) with the exact policy clause quoted from the page, the source URL, the return window and a confidence score. It NEVER invents: if it cannot verify a clause it returns UNKNOWN (free). Priced at " + price + " USD per verified answer; UNKNOWN is free; a keyless free trial is available.",
-    description_for_human: "Verified return-policy answers for AI shopping agents. Never guesses.",
+      "ReturnCheck verifies which return policy actually applies to this purchase. Call check_return with product_url, buyer_country (ISO alpha-2) and — strongly recommended — page_text or page_html of the page you already have open. Your browser renders JavaScript and is not blocked by retailers; ours is. Measured 2026-08-28 on 50 US retailers: sending the page works on any store, while letting us fetch it reaches the policy for 17 of 50 (34%), mostly Shopify and direct-to-consumer brands. Returns a verified verdict (YES / YES_WITH_CONDITIONS / NO / UNKNOWN) with the exact policy clause quoted from the page, the source URL, the return window and a confidence score. It NEVER invents: if it cannot verify a clause it returns UNKNOWN (free). Priced at " + price + " USD per verified answer; UNKNOWN is free; a keyless free trial is available.",
+    description_for_human: "ReturnCheck verifies which return policy actually applies to this purchase.",
     auth: { type: "none" },
     api: { type: "openapi", url: base + "/openapi.json" },
     logo_url: base + "/favicon.ico",
@@ -614,7 +616,7 @@ export function agentsJson(env) {
   const doc = {
     schema_version: "0.1",
     name: "ReturnCheck",
-    description: "Verified return-policy answers for AI shopping agents. Never invents: returns UNKNOWN instead of guessing.",
+    description: "ReturnCheck verifies which return policy actually applies to this purchase. Never invents: returns UNKNOWN instead of guessing.",
     url: base,
     openapi: base + "/openapi.json",
     data_policy: base + "/data-policy",
@@ -630,7 +632,7 @@ export function agentsJson(env) {
     pricing: { unit: "per_verified_answer", amount_usd: price, currency: "USD", unknown_is_free: true, payment: ["x402", "prepaid_api_key"] },
     flows: [{
       name: "check_return",
-      description: "Can this specific product actually be returned for this buyer?",
+      description: "Verify which return policy actually applies to this purchase for this buyer.",
       endpoint: "POST " + base + "/v1/check",
       required: ["product_url", "buyer_country"],
       recommended: ["page_text", "page_html"],
@@ -697,13 +699,13 @@ function openapi(env) {
   const base = env.PUBLIC_BASE_URL || "";
   const spec = {
     openapi: "3.1.0",
-    info: { title: "ReturnCheck", version: "1.0.0", description: "Verified return-policy answers for AI shopping agents. Never invents: returns UNKNOWN instead of guessing." },
+    info: { title: "ReturnCheck", version: "1.0.0", description: "ReturnCheck verifies which return policy actually applies to this purchase. Never invents: returns UNKNOWN instead of guessing." },
     servers: [{ url: base }],
     paths: {
       "/v1/check": {
         post: {
           operationId: "check_return",
-          summary: "Can this specific product actually be returned?",
+          summary: "Verify which return policy actually applies to this purchase.",
           description: "Returns a verified verdict with the exact policy clause. No API key = limited free trial; with an API key it costs " + Number(env.PRICE_USD || "0.02") + " USD per useful verdict (UNKNOWN is free).",
           security: [{}, { bearerAuth: [] }, { paymentSignature: [] }],
           ...(x402Activo(env) && requisitosDePago(env) ? {

@@ -53,12 +53,12 @@ export function landingPage(env, url) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ReturnCheck — Evidence-backed return decisions for AI agents</title>
-  <meta name="description" content="ReturnCheck gives AI shopping agents a verified return-policy verdict with the exact supporting clause—or an honest UNKNOWN.">
+  <title>ReturnCheck — Verify which return policy applies to this purchase</title>
+  <meta name="description" content="ReturnCheck verifies which return policy actually applies to this purchase, with evidence and an honest UNKNOWN when the case cannot be proven.">
   <meta name="theme-color" content="#07142d">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="ReturnCheck — Evidence-backed return decisions">
-  <meta property="og:description" content="Exact policy clauses. Verifiable outcomes. Honest UNKNOWN.">
+  <meta property="og:title" content="ReturnCheck — Verify which return policy applies">
+  <meta property="og:description" content="ReturnCheck verifies which return policy actually applies to this purchase.">
   <meta property="og:url" content="${esc(canonical)}">
   <meta name="twitter:card" content="summary">
   <link rel="canonical" href="${esc(canonical)}">
@@ -251,8 +251,8 @@ export function landingPage(env, url) {
     <div class="wrap hero">
       <div>
         <div class="eyebrow">Live beta · US-first</div>
-        <h1>Return decisions your agent can verify.</h1>
-        <p class="lead">ReturnCheck answers one purchase-critical question: <strong>can this specific product actually be returned?</strong> Every determinate verdict carries the exact supporting clause. If the evidence does not resolve the case, the answer is UNKNOWN.</p>
+        <h1>Verify which return policy actually applies to this purchase.</h1>
+        <p class="lead"><strong>ReturnCheck verifies which return policy actually applies to this purchase.</strong> Every determinate verdict carries the exact supporting clause. If the evidence does not resolve the case, the answer is UNKNOWN.</p>
         <div class="actions">
           <a class="button primary" href="${esc(sampleHref)}">Request a 2-case sample <span aria-hidden="true">→</span></a>
           <a class="button secondary" href="${esc(base)}/openapi.json">View developer docs</a>
