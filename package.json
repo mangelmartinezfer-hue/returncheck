@@ -7,7 +7,12 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "validate": "node tools/preflight/runner.mjs all",
+    "validate:payment": "node tools/preflight/runner.mjs payment",
+    "validate:ucp": "node tools/preflight/runner.mjs ucp",
+    "validate:corpus": "node tools/preflight/runner.mjs corpus",
+    "test:preflight": "node --test test/preflight.test.mjs"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^0.0.14"

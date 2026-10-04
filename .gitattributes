@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Evidence hashes must match on Windows and Linux.
+test/fixtures/ikea-policy-2026-10-02.txt text eol=lf
