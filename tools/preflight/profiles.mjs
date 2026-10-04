@@ -125,4 +125,22 @@ export function corpus(c, m) {
   c.warn('LEGACY_BANKS_NOT_REAL_SOURCE_CORPUS', 'src/*-cases.mjs');
   c.doubt('LEGACY_PROVENANCE_NOT_VALIDATED', 'src/*-cases.mjs');
 }
-export const profiles = { payment, ucp: evidence, corpus };
+export function artifact(c, m) {
+  c.check(m.mode === 'intake', 'MODE_INVALID', 'mode');
+  c.check(nonempty(m.purpose), 'PURPOSE_REQUIRED', 'purpose');
+  if (!c.check(Array.isArray(m.files) && m.files.length > 0, 'FILES_REQUIRED', 'files')) return;
+  const seen = new Set();
+  for (const [i, f] of m.files.entries()) {
+    const p = `files[${i}]`;
+    if (!c.check(object(f), 'FILE_INVALID', p)) continue;
+    c.check(nonempty(f.path) && !seen.has(f.path), 'FILE_MISSING_OR_DUPLICATE', `${p}.path`); seen.add(f.path);
+    c.check(typeof f.sha256 === 'string' && /^[a-f0-9]{64}$/.test(f.sha256), 'HASH_REQUIRED', `${p}.sha256`);
+    const bytes = c.bytes(f.path, f.sha256);
+    c.check(Number.isSafeInteger(f.bytes) && f.bytes > 0 && bytes.length === f.bytes, 'SIZE_MISMATCH', `${p}.bytes`);
+    c.check(['json', 'text', 'binary'].includes(f.format), 'FORMAT_INVALID', `${p}.format`);
+    if (f.format === 'json') JSON.parse(bytes.toString('utf8'));
+  }
+  c.warn('INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION', 'files');
+  c.doubt('CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW', 'files');
+}
+export const profiles = { payment, ucp: evidence, corpus, artifact };

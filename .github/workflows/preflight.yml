@@ -1,10 +1,7 @@
 name: Preflight and regression tests
 on:
   pull_request:
-    paths: ['src/**', 'test/**', 'preflight/**', 'tools/preflight/**', 'package*.json', '*.sql', 'wrangler.toml', '.gitattributes', '.gitignore', '.github/workflows/preflight.yml']
   push:
-    branches: [main]
-    paths: ['src/**', 'test/**', 'preflight/**', 'tools/preflight/**', 'package*.json', '*.sql', 'wrangler.toml', '.gitattributes', '.gitignore', '.github/workflows/preflight.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -19,8 +16,5 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Deterministic preflight
-        run: npm run validate
-      - name: Full regression suite
-        if: ${{ !cancelled() }}
-        run: npm test
+      - name: Preflight, registered jobs and full regression suite
+        run: npm run check

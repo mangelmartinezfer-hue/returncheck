@@ -1,4 +1,4 @@
-# Preflight permanente — v1
+# Preflight permanente — v1.1
 
 Los scripts comprueban hechos reproducibles antes de una revisión por IA. No se
 importan desde el Worker y no ejecutan pagos, red, migraciones ni despliegues.
@@ -14,6 +14,7 @@ npm run validate:ucp
 npm run validate:corpus
 node tools/preflight/runner.mjs all --json
 npm test
+npm run check
 ```
 
 Se resuelven los archivos respecto a la raíz del repositorio, incluso ejecutando
@@ -142,13 +143,51 @@ corpus de producción.
 
 ## Automatización y extensión
 
-GitHub Actions ejecuta los tres perfiles y toda la suite en PRs relevantes,
-push a main y ejecución manual, sin secretos y con permisos de lectura.
-La protección de rama/check obligatorio debe configurarse aparte; no se ha
-modificado. Cambios exclusivamente documentales no disparan este workflow.
+`npm run check` es el cierre habitual: ejecuta los perfiles base, todos los
+trabajos registrados y la suite completa, incluso si algún perfil falla.
+Guarda `report.json`, `tests.tap` y `summary.md` en `.preflight-results/`
+(ignorado por Git). `npm test` incluye un pretest obligatorio dentro de ese
+comando: ejecuta validadores y solo pasa a tests si no hay errores bloqueantes.
+Ejecutar Node directamente puede saltarse ese hook; la CI ejecuta `check`.
 
-Para ampliar: añadir una función de perfil al registro de `profiles.mjs`, un
-manifiesto versionado y pruebas de fallos. Mantener controles puros y sin red;
+GitHub Actions ejecuta `check` en todos los pushes y PRs, además de ejecución
+manual, sin secretos y con permisos de lectura. Su resumen muestra resultados
+y recuentos sin publicar cuerpos, firmas o informes de entrada completos.
+No necesita cambiar filtros al aparecer una carpeta o tipo de trabajo nuevo.
+La protección de rama/check obligatorio debe configurarse aparte; no se ha
+modificado. Una ejecución correcta no activa una revisión de IA autónoma.
+
+### Conectar un trabajo nuevo
+
+```sh
+npm run work:new -- ucp catalogo-nuevo
+# Completar preflight/jobs/catalogo-nuevo.json y sus archivos.
+npm run check
+```
+
+El registro descubre automáticamente todos los JSON de `preflight/jobs/`, por
+orden estable, incluidas subcarpetas. No acepta perfiles desconocidos, archivos
+ilegibles ni enlaces simbólicos. Un manifiesto vacío falla; la herramienta de
+alta no inventa evidencias ni aprueba plantillas. No sobrescribe archivos.
+Para pago/corpus cambiar `ucp` por `payment`/`corpus`. Los datos privados se
+validan explícitamente desde `_local/`; no registrarlos en CI pública.
+
+Para un tipo aún sin reglas propias, `npm run work:new -- artifact nombre` crea
+un control general. Rellenar `purpose` y `files` con objetos `{ "path":
+"ruta-relativa", "sha256": "hash-revisado", "bytes": 123, "format": "json" }`.
+Formatos: json, text o binary. Exige archivos no vacíos, hash y tamaño exactos;
+para JSON comprueba sintaxis. Señala explícitamente que no valida significado,
+calidad ni reglas del nuevo dominio. Esas reglas requieren ampliar el perfil,
+no basta con renombrar un archivo o confiar en la IA.
+
+`AGENTS.md` fija clasificación, registro, validación, corrección y revisión por
+IA como rutina de los agentes que trabajen en este repo. La plantilla de PR
+pide evidencia de esos pasos. Son instrucciones de trabajo; no un servicio de
+IA en segundo plano ni una garantía de que cualquier cambio externo esté cubierto.
+
+Para ampliar: añadir una función de perfil al registro de `profiles.mjs`, admitir
+su plantilla en `new-job.mjs`, un manifiesto versionado y pruebas de fallos.
+Mantener controles puros y sin red;
 capturas en vivo y otros efectos deben ser un paso explícito separado. Pendiente:
 adaptador al catálogo UCP real, ingestión y metadatos completos del corpus,
 comparaciones semánticas y conexión con expedientes Mitaka cuando se integren

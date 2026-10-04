@@ -27,3 +27,7 @@ corpus*.json
 
 # Public preflight configuration, not a production corpus export.
 !preflight/corpus.json
+!preflight/jobs/**/*.json
+
+# Local validation outputs; do not publish private job reports.
+.preflight-results/

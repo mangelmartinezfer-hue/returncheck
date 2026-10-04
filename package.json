@@ -12,7 +12,10 @@
     "validate:payment": "node tools/preflight/runner.mjs payment",
     "validate:ucp": "node tools/preflight/runner.mjs ucp",
     "validate:corpus": "node tools/preflight/runner.mjs corpus",
-    "test:preflight": "node --test test/preflight.test.mjs"
+    "test:preflight": "node --test test/preflight.test.mjs",
+    "pretest": "npm run validate",
+    "check": "node tools/preflight/check.mjs",
+    "work:new": "node tools/preflight/new-job.mjs"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^0.0.14"
