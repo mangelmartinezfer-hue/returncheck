@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "profile": "ucp",
+  "mode": "intake",
+  "records": [
+    {
+      "id": "ikea-us-opened-2026-10-02",
+      "synthetic": false,
+      "split": "catalog",
+      "as_of": "2026-10-02",
+      "item_condition": "opened",
+      "reason": "changed_mind",
+      "seller": "IKEA US",
+      "marketplace": "none",
+      "expected": "YES_WITH_CONDITIONS",
+      "source": {
+        "file": "test/fixtures/ikea-policy-2026-10-02.txt",
+        "url": "https://www.ikea.com/us/en/customer-service/returns-claims/",
+        "captured_at": "2026-10-02",
+        "sha256": "bb0bf2952b7eef78fd89a47cf73ec048fe158e2f071d0235ce05464d3e4ac0e5"
+      },
+      "exact_clause": "You may also return open products within 180 days, with your proof of purchase, for a full refund.",
+      "claims": {
+        "merchant_return_days": {
+          "value": 180,
+          "quote": "You may also return open products within 180 days, with your proof of purchase, for a full refund."
+        }
+      }
+    }
+  ]
+}

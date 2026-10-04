@@ -83,6 +83,20 @@ require the normal verification path.
 - LLM manifest: `/llms.txt`
 - MCP tool list: `/mcp`
 
+## Deterministic preflight
+
+Run `npm run check` to validate registered work and run the full regression suite.
+Use `npm run work:new -- ucp job-name` to register new work (payment, corpus and
+artifact profiles are also available). All registered jobs run automatically on
+every push and pull request. See `AGENTS.md` for the permanent review routine.
+
+Run `npm run validate` before reviewing payment packages, UCP evidence or corpus
+changes. Three offline profiles produce PASS/FAIL, blocking errors, warnings,
+SHA-256 hashes and fields requiring subsequent AI review. See
+[preflight/README.md](preflight/README.md) for input contracts, limits and commands.
+`npm test` includes the preflight regression tests. A PASS is not deployment or
+payment authorization.
+
 ## Design principles
 
 - **Never invent.** Every determinate verdict carries a clause verified literally
