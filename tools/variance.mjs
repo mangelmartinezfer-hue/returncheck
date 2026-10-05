@@ -7,21 +7,25 @@
 //
 // CÓMO SE USA (PowerShell):
 //   $env:RC_API_KEY = "<tu clave>"          # NUNCA la pegues en un chat
-//   node tools/variance.mjs --n 8 --case finita90
+//   node tools/variance.mjs --as-of 2026-08-20 --n 8 --case finita90
 //   $env:RC_API_KEY = ""                    # limpiar al terminar
 //
 // Sin RC_API_KEY usa el tramo gratuito, que está limitado a 3 llamadas por IP
 // y día: sirve para probar el script, no para medir.
 //
 // PROTOCOLO DEL EXPERIMENTO (una sola variable):
-//   1. Con AI_TEMPERATURE = "0.6" en el panel  -> node tools/variance.mjs --n 8
-//   2. Con AI_TEMPERATURE = "0"   en el panel  -> node tools/variance.mjs --n 8
+//   1. Con AI_TEMPERATURE = "0.6" en el panel  -> node tools/variance.mjs --as-of 2026-08-20 --n 8
+//   2. Con AI_TEMPERATURE = "0"   en el panel  -> node tools/variance.mjs --as-of 2026-08-20 --n 8
 //   Mismo build, mismo caso, misma N. Solo cambia la temperatura.
+
+import { referenceDate, responseFingerprint } from './variance-input.mjs';
 
 const BASE = process.env.RC_BASE_URL || "https://returncheck.m-angelmartinez-fer.workers.dev";
 const KEY = process.env.RC_API_KEY || "";
 
 const args = process.argv.slice(2);
+let asOf;
+try { asOf = referenceDate(args); } catch (e) { console.error(e.message); process.exit(1); }
 const arg = (name, def) => {
   const i = args.indexOf("--" + name);
   return i >= 0 && args[i + 1] ? args[i + 1] : def;
@@ -79,25 +83,14 @@ if (!CASE) {
 // Huella de una respuesta: lo que de verdad tiene que ser estable.
 // Un cambio de redacción en answer_human no nos importa; un cambio de veredicto,
 // de plazo o de cláusula citada, sí.
-function huella(r) {
-  const p = r.policy || {};
-  const clause = (r.evidence && r.evidence.exact_clause) || "";
-  return [
-    r.verdict,
-    "days=" + (p.merchant_return_days ?? "null"),
-    "basis=" + (p.window_basis ?? "null"),
-    "deadline=" + (p.deadline_date ?? "null"),
-    "cat=" + (p.return_category ?? "null"),
-    "clause=" + clause.slice(0, 70),
-  ].join(" | ");
-}
+const huella = responseFingerprint;
 
 async function unaPasada(i) {
   const headers = { "content-type": "application/json" };
   if (KEY) headers.authorization = "Bearer " + KEY;
   const t0 = Date.now();
   const res = await fetch(BASE + "/v1/check", {
-    method: "POST", headers, body: JSON.stringify(CASE.body),
+    method: "POST", headers, body: JSON.stringify({ ...CASE.body, as_of: asOf }),
   });
   const ms = Date.now() - t0;
   const json = await res.json().catch(() => ({ error: "respuesta no era JSON" }));
@@ -111,6 +104,7 @@ async function unaPasada(i) {
 console.log("");
 console.log("  Medidor de varianza — W05");
 console.log("  ─────────────────────────────────────────────");
+console.log("  As of     : " + asOf);
 console.log("  Caso      : " + caseKey + " — " + CASE.nombre);
 console.log("  Esperado  : " + CASE.esperado);
 console.log("  Pasadas   : " + N);

@@ -3,6 +3,9 @@ import { profiles } from './profiles.mjs';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { readdirSync } from 'node:fs';
+import { manifestSchema } from './schema.mjs';
+import { crossLots } from './cross-lots.mjs';
+import { applyReview } from './review.mjs';
 
 export function run(root, profile, manifest = `preflight/${profile}.json`) {
   const c = context(root, profile);
@@ -11,12 +14,16 @@ export function run(root, profile, manifest = `preflight/${profile}.json`) {
     if (!Object.hasOwn(profiles, profile)) { c.error('UNKNOWN_PROFILE', 'profile'); return c.finish(); }
     const m = c.json(manifest);
     if (!c.check(object(m) && m.schema_version === 1 && m.profile === profile, 'MANIFEST_INVALID', manifest)) return c.finish();
+    manifestSchema(c, m);
     profiles[profile](c, m);
   } catch {
     // Never print input bytes, signatures, credentials or raw parser exceptions.
     c.error('INPUT_UNREADABLE_OR_INVALID', manifest);
   }
-  return c.finish();
+  const report = c.finish();
+  report.technical_status = report.status;
+  report.review_status = 'PENDING'; report.ready_for_delivery = false;
+  return report;
 }
 
 // Only registered manifests are inputs; never execute modules supplied by a job.
@@ -37,15 +44,17 @@ export function registeredJobs(root) {
 }
 
 export function runAll(root) {
-  const reports = ['payment', 'ucp', 'corpus'].map(p => run(root, p));
+  const reports = ['payment', 'ucp', 'corpus', 'metrics'].map(p => run(root, p));
   const c = context(root, 'registry');
   try {
-    for (const path of registeredJobs(root)) {
+    const jobs = registeredJobs(root);
+    for (const path of jobs) {
       try {
         const m = c.json(path);
-        reports.push(run(root, object(m) && typeof m.profile === 'string' ? m.profile : 'unknown', path));
+        reports.push(applyReview(root, run(root, object(m) && typeof m.profile === 'string' ? m.profile : 'unknown', path)));
       } catch { c.error('JOB_MANIFEST_INVALID', path); }
     }
+    reports.push(crossLots(root, ['preflight/ucp.json', ...jobs]));
   } catch { c.error('JOB_REGISTRY_UNREADABLE', 'preflight/jobs'); }
   reports.push(c.finish());
   return reports;

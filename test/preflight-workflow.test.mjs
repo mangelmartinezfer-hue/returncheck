@@ -21,7 +21,8 @@ test('new jobs are discovered recursively, in stable order, without editing conf
   f.write('preflight/jobs/sub/b.json', f.m); f.write('preflight/jobs/a.json', f.m);
   assert.deepEqual(registeredJobs(f.root), ['preflight/jobs/a.json', 'preflight/jobs/sub/b.json']);
   const jobs = runAll(f.root).filter(r => r.profile === 'artifact');
-  assert.equal(jobs.length, 2); assert.ok(jobs.every(r => r.status === 'PASS'));
+  assert.equal(jobs.length, 2); assert.ok(jobs.every(r => r.technical_status === 'PASS'));
+  assert.ok(jobs.every(r => r.status === 'FAIL' && r.review_status === 'UNRESOLVED'));
   assert.ok(jobs.every(r => r.warnings.some(w => w.code === 'INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION')));
 });
 test('corrupt and unknown job manifests fail instead of being silently skipped', t => {
