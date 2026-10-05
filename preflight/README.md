@@ -187,6 +187,13 @@ editar un manifiesto tampoco permite dejar sus antiguas entradas presentes sin
 otro control que las cubra. Revisar renombrados y retiradas como cambios de trabajo.
 La clasificación es por convención de rutas; no entiende semánticamente cualquier
 archivo ni incluye material ignorado/privado. No ocultar entregas bajo carpetas de tests.
+Además se inventarían los archivos presentes, aunque no estén en el diff. El
+histórico anterior a esta mejora se determina desde el commit fijo `40ca077`,
+no desde una lista ampliable ni desde la base móvil de la PR. Sus archivos sin
+manifiesto producen `LEGACY_UNREGISTERED_WORK`; los posteriores bloquean. Registrar
+o retirar archivos históricos reduce la deuda visible. Modificar un archivo
+histórico sigue exigiendo cobertura del diff. Se necesita ese commit en el clon
+(CI descarga el historial completo). Esto no acredita la calidad del histórico.
 La protección de rama/check obligatorio debe configurarse aparte; no se ha
 modificado. Una ejecución correcta no activa una revisión de IA autónoma.
 

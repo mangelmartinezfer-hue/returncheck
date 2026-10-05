@@ -1,4 +1,5 @@
 import { object } from './core.mjs';
+import { ITEM_CONDITIONS, REASONS } from '../../src/contract.mjs';
 
 export function keys(c, value, allowed, field) {
   if (!c.check(object(value), 'OBJECT_REQUIRED', field)) return false;
@@ -20,8 +21,8 @@ export function manifestSchema(c, m) {
 }
 export function recordSchema(c, r, p) {
   keys(c, r, ['id', 'synthetic', 'split', 'as_of', 'item_condition', 'reason', 'seller', 'marketplace', 'expected', 'source', 'exact_clause', 'claims'], p);
-  c.check(['unopened', 'opened', 'used', 'defective'].includes(r.item_condition), 'ITEM_CONDITION_INVALID', `${p}.item_condition`);
-  c.check(['changed_mind', 'defective', 'wrong_size_or_model', 'arrived_late', 'other'].includes(r.reason), 'REASON_INVALID', `${p}.reason`);
+  c.check(ITEM_CONDITIONS.includes(r.item_condition), 'ITEM_CONDITION_INVALID', `${p}.item_condition`);
+  c.check(REASONS.includes(r.reason), 'REASON_INVALID', `${p}.reason`);
   if (r.source) keys(c, r.source, ['file', 'sha256', 'url', 'captured_at'], `${p}.source`);
 }
 export function claimSchema(c, claim, name, p) {

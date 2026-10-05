@@ -9,7 +9,8 @@ import { context, sha256 } from '../tools/preflight/core.mjs';
 import { run, runAll } from '../tools/preflight/runner.mjs';
 import { applyReview, reviewDraft, reviewPath } from '../tools/preflight/review.mjs';
 import { crossLots } from '../tools/preflight/cross-lots.mjs';
-import { coverage, changedPaths, orphanedInputs } from '../tools/preflight/coverage.mjs';
+import { coverage, changedPaths, orphanedInputs, inventoryCoverage } from '../tools/preflight/coverage.mjs';
+import { ITEM_CONDITIONS, REASONS, validateRequest } from '../src/contract.mjs';
 import { capture, PUBLIC_CAPTURE_URLS } from '../tools/preflight/capture.mjs';
 import { summarizeRun } from '../tools/preflight/metrics.mjs';
 import { pointer } from '../tools/preflight/delivery.mjs';
@@ -34,6 +35,34 @@ function approve(f, report) {
   for (const row of r.resolutions) Object.assign(row, { decision: 'ACCEPTED_LIMITATION', reason: 'Synthetic fixture explicitly reviewed.' });
   f.write(reviewPath(f.path), r); return r;
 }
+test('intake follows the live contract enums, including future additions', t => {
+  const f = fixture(t);
+  for (const [field, values] of [['item_condition', ITEM_CONDITIONS], ['reason', REASONS]]) {
+    // A temporary addition proves the validator imports the contract rather than
+    // maintaining an identical copy. Always restore shared state in this process.
+    values.push('__future_contract_value__');
+    try {
+      for (const value of values) {
+        f.record[field] = value;
+        assert.equal(validateRequest({ product_url: 'https://example.com/item', buyer_country: 'US', [field]: value }).ok, true);
+        assert.equal(f.technical().status, 'PASS', `${field}: ${value}`);
+      }
+    } finally { values.pop(); f.record[field] = values[0]; }
+  }
+});
+test('inventory blocks undeclared committed work even outside the current diff', () => {
+  const c = context(repo, 'coverage');
+  inventoryCoverage(c, ['cards/old.mjs', 'cards/new.mjs', 'cards/declared.mjs'], new Set(['cards/old.mjs']), new Set(['cards/declared.mjs']));
+  assert.deepEqual(c.report.errors.map(e => e.code), ['UNREGISTERED_WORK']);
+  assert.deepEqual(c.report.warnings.map(e => e.code), ['LEGACY_UNREGISTERED_WORK']);
+  assert.equal(c.report.inventory_files.length, 3);
+});
+test('registering or removing historical work reduces visible debt', () => {
+  const c = context(repo, 'coverage');
+  inventoryCoverage(c, ['cards/old.mjs'], new Set(['cards/old.mjs', 'cards/deleted.mjs']), new Set(['cards/old.mjs']));
+  assert.equal(c.report.warnings.length, 0);
+  assert.equal(c.finish().status, 'PASS');
+});
 for (const [name, edit, code] of [
   ['invalid condition', f => f.record.item_condition = 'NOT_A_CONDITION', 'ITEM_CONDITION_INVALID'],
   ['invalid reason', f => f.record.reason = 'anything', 'REASON_INVALID'],

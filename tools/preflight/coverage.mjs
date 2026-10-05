@@ -1,5 +1,23 @@
 import { execFileSync } from 'node:child_process';
 import { context } from './core.mjs';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+// Fixed pre-hardening history, never HEAD or the moving PR base. New work cannot
+// become historical debt merely by being committed or by changing a manifest.
+const LEGACY_COMMIT = '40ca077f49b3ac2bf976cbf96a6cf01bc5cdcfa8';
+export function inventoryCoverage(c, paths, legacy, covered, reviews = new Set()) {
+  c.report.inventory_files = [];
+  for (const path of paths) {
+    if (classify(path) !== 'requires-manifest' || reviews.has(path)) continue;
+    const declared = covered.has(path);
+    c.report.inventory_files.push({ path, covered: declared, legacy: legacy.has(path) });
+    if (!declared) {
+      if (legacy.has(path)) c.warn('LEGACY_UNREGISTERED_WORK', path);
+      else c.error('UNREGISTERED_WORK', path);
+    }
+  }
+}
 
 function git(root, args) { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 10 * 1024 * 1024 }); }
 function resolveBase(root, base) {
@@ -40,6 +58,11 @@ export function coverage(root, reports, paths) {
   try {
     const inputs = new Set(reports.flatMap(r => r.artifacts.map(a => a.path.replace(/\\/g, '/'))));
     const reviews = new Set(reports.filter(r => r.manifest?.startsWith('preflight/jobs/')).map(r => r.manifest.replace('preflight/jobs/', 'preflight/reviews/')));
+    if (paths === undefined) {
+      const legacy = new Set(git(root, ['ls-tree', '-r', '--name-only', '-z', LEGACY_COMMIT]).split('\0').filter(Boolean));
+      const inventory = [...new Set((git(root, ['ls-files', '-z']) + git(root, ['ls-files', '--others', '--exclude-standard', '-z'])).split('\0').filter(p => p && existsSync(join(root, p))))].sort();
+      inventoryCoverage(c, inventory, legacy, inputs, reviews);
+    }
     if (paths === undefined) for (const input of orphanedInputs(root, inputs)) c.error('ORPHANED_INPUT_AFTER_MANIFEST_CHANGE', input);
     c.report.changed_files = (paths ?? changedPaths(root)).map(path => {
       const category = classify(path);

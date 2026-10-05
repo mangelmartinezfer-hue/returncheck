@@ -2,8 +2,8 @@
 // No usamos librerías de JSON-Schema para mantener el Worker ligero; validamos
 // a mano exactamente las reglas del contrato.
 
-const ITEM_CONDITIONS = ["unopened", "opened", "used", "defective"];
-const REASONS = ["changed_mind", "defective", "wrong_size_or_model", "arrived_late", "other"];
+export const ITEM_CONDITIONS = ["unopened", "opened", "used", "defective"];
+export const REASONS = ["changed_mind", "defective", "wrong_size_or_model", "arrived_late", "other"];
 const PURCHASE_CHANNELS = ["online", "store", "phone", "marketplace"];
 
 // Devuelve { ok:true, value } o { ok:false, code, message }.
