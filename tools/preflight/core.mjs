@@ -10,9 +10,10 @@ export function url(v) {
   try { const u = new URL(v); return typeof v === 'string' && ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password; } catch { return false; }
 }
 export function context(root, profile) {
-  const report = { schema_version: 1, validator_version: '1.1.0', profile, status: 'PASS', errors: [], warnings: [], artifacts: [], sources: [], doubtful_fields: [], ai_review: 'PENDING' };
+  const report = { schema_version: 1, validator_version: '1.2.0', profile, status: 'PASS', errors: [], warnings: [], artifacts: [], sources: [], doubtful_fields: [], ai_review: 'PENDING' };
   const issue = (list, code, field) => report[list].push({ code, field });
   const c = {
+    root,
     report,
     error: (code, field) => issue('errors', code, field),
     warn: (code, field) => issue('warnings', code, field),

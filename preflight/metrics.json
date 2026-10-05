@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "profile": "metrics",
+  "mode": "repository",
+  "runs": [
+    "evaluaciones/2026-08-31-w47-holdout-pase1.json",
+    "evaluaciones/2026-08-31-w47-holdout-pase2.json",
+    "evaluaciones/2026-08-31-w47-holdout-pase3.json",
+    "evaluaciones/2026-08-31-w47-holdout-pase4.json",
+    "evaluaciones/2026-08-31-w47-holdout-pase5.json"
+  ],
+  "expected": {
+    "runs": 5,
+    "cases": 25,
+    "date": "2026-08-31",
+    "model": "default-8b-fast",
+    "build": "2026-08-30-w47-cita-manda-sobre-numero",
+    "accuracy_pct": 92,
+    "coverage_pct": 72,
+    "precision_determinate_pct": 100,
+    "coverage_ceiling_pct": 80,
+    "unsafe_errors": 0,
+    "safe_misses": 2,
+    "hallucinations": 0
+  },
+  "published_file": "src/landing.mjs",
+  "published_fragments": [
+    "<b>{precision_determinate_pct}%</b>",
+    "<b>{coverage_pct}% / {coverage_ceiling_pct}%</b>",
+    "<b>{unsafe_errors}</b><span>unsafe errors</span>"
+  ]
+}

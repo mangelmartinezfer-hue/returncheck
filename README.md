@@ -89,6 +89,9 @@ Run `npm run check` to validate registered work and run the full regression suit
 Use `npm run work:new -- ucp job-name` to register new work (payment, corpus and
 artifact profiles are also available). All registered jobs run automatically on
 every push and pull request. See `AGENTS.md` for the permanent review routine.
+Registered jobs now require a review receipt bound to the exact inputs. The check
+also detects uncovered changed files and cross-lot corpus contamination. Delivery
+and historical metrics profiles provide package/snapshot and benchmark checks.
 
 Run `npm run validate` before reviewing payment packages, UCP evidence or corpus
 changes. Three offline profiles produce PASS/FAIL, blocking errors, warnings,

@@ -15,7 +15,11 @@
     "test:preflight": "node --test test/preflight.test.mjs",
     "pretest": "npm run validate",
     "check": "node tools/preflight/check.mjs",
-    "work:new": "node tools/preflight/new-job.mjs"
+    "work:new": "node tools/preflight/new-job.mjs",
+    "validate:metrics": "node tools/preflight/runner.mjs metrics",
+    "review:prepare": "node tools/preflight/prepare-review.mjs",
+    "capture:public": "node tools/preflight/capture.mjs",
+    "check:protection": "node tools/preflight/governance.mjs"
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^0.0.14"

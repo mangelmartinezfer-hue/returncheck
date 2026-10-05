@@ -3,6 +3,9 @@ import { retoDePago } from '../../src/x402.mjs';
 import { PAYMENT_INSTRUCTIONS } from '../../src/payment-discovery.mjs';
 import { EVAL_CASES } from '../../src/eval-cases.mjs';
 import { HOLDOUT_CASES } from '../../src/holdout-cases.mjs';
+import { recordSchema, claimSchema } from './schema.mjs';
+import { metrics } from './metrics.mjs';
+import { compareDelivery } from './delivery.mjs';
 
 const verdicts = ['YES', 'YES_WITH_CONDITIONS', 'NO', 'UNKNOWN'];
 const identifier = /^[a-zA-Z0-9_-]{16,128}$/;
@@ -65,6 +68,7 @@ export function evidence(c, m) {
   m.records.forEach((r, i) => {
     const p = `records[${i}]`;
     if (!c.check(object(r), 'RECORD_INVALID', p)) return;
+    recordSchema(c, r, p);
     c.check(nonempty(r.id) && !ids.has(r.id), 'ID_MISSING_OR_DUPLICATE', `${p}.id`); ids.add(r.id);
     c.check(typeof r.synthetic === 'boolean', 'SYNTHETIC_REQUIRED', `${p}.synthetic`);
     c.check(['development', 'holdout', 'catalog'].includes(r.split), 'SPLIT_INVALID', `${p}.split`);
@@ -97,6 +101,7 @@ export function evidence(c, m) {
     if (!c.check(object(r.claims), 'CLAIMS_REQUIRED', `${p}.claims`)) return;
     c.check(Object.keys(r.claims).length > 0, 'CLAIMS_EMPTY', `${p}.claims`);
     for (const [field, claim] of Object.entries(r.claims)) {
+      claimSchema(c, claim, field, `${p}.claims.${field}`);
       if (!object(claim) || !Object.hasOwn(claim, 'value') || !nonempty(claim.quote) || !content.includes(claim.quote)) c.error('CLAIM_UNSUPPORTED', `${p}.claims.${field}`);
       c.doubt('CLAIM_ENTAILMENT_REQUIRES_REVIEW', `${p}.claims.${field}`);
     }
@@ -143,4 +148,5 @@ export function artifact(c, m) {
   c.warn('INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION', 'files');
   c.doubt('CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW', 'files');
 }
-export const profiles = { payment, ucp: evidence, corpus, artifact };
+export function delivery(c, m) { artifact(c, m); compareDelivery(c, m, c.root); }
+export const profiles = { payment, ucp: evidence, corpus, artifact, delivery, metrics };

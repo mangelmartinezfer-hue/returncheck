@@ -3,11 +3,13 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { runAll } from './runner.mjs';
+import { coverage } from './coverage.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const output = join(root, '.preflight-results');
 mkdirSync(output, { recursive: true });
 const reports = runAll(root);
+reports.push(coverage(root, reports));
 writeFileSync(join(output, 'report.json'), JSON.stringify(reports, null, 2) + '\n');
 // Run regression tests even if a profile fails, giving the reviewer both results.
 const tests = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'test/*.test.mjs'], { cwd: root, encoding: 'utf8', maxBuffer: 20 * 1024 * 1024, timeout: 300000 });
@@ -16,9 +18,9 @@ const failed = reports.some(r => r.status === 'FAIL') || tests.status !== 0;
 const summary = [
   '# ReturnCheck — control de calidad', '',
   `Resultado: **${failed ? 'FAIL' : 'PASS'}**`, '',
-  ...reports.map((r, i) => `- ${['payment', 'ucp', 'corpus', 'artifact', 'registry'].includes(r.profile) ? r.profile : 'perfil inválido'} (control ${i + 1}): ${r.status}; ${r.errors.length} errores, ${r.warnings.length} advertencias, ${r.doubtful_fields.length} campos dudosos.`),
+  ...reports.map((r, i) => `- ${['payment', 'ucp', 'corpus', 'artifact', 'registry', 'cross-lots', 'coverage', 'metrics', 'delivery'].includes(r.profile) ? r.profile : 'perfil inválido'} (control ${i + 1}): ${r.status}; ${r.errors.length} errores, ${r.warnings.length} advertencias, ${r.doubtful_fields.length} campos dudosos.`),
   `- Tests completos: ${tests.status === 0 ? 'PASS' : 'FAIL (consultar tests.tap)'}.`,
-  '- Revisión de IA: PENDING. PASS no autoriza fusionar, desplegar o pagar.', '',
+  '- Los trabajos registrados requieren revisión vigente; los perfiles base son controles históricos/técnicos. PASS no autoriza fusionar, desplegar o pagar.', '',
   'Detalles locales: .preflight-results/report.json y tests.tap.', '',
 ].join('\n');
 writeFileSync(join(output, 'summary.md'), summary);
