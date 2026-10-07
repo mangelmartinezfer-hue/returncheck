@@ -26,6 +26,12 @@ test("published HTTP challenge, header and discovery agree without DB or model",
   assert.deepEqual(challenge.extensions, discovery.extensions);
   assert.equal(challenge.extensions["payment-identifier"].info.required, true);
   assert.deepEqual(challenge.accepts, requisitosDePago(ENV));
+  assert.deepEqual(discovery.payment_instructions.envelope.required_top_level, ["x402Version", "accepted", "payload", "extensions"]);
+  assert.equal(discovery.payment_instructions.envelope.accepted_from, "Copy the complete accepts[0] object from the live 402 challenge.");
+  assert.deepEqual(discovery.payment_instructions.envelope.client_extensions, ["payment-identifier"]);
+  assert.deepEqual(discovery.payment_instructions.envelope.do_not_copy_extensions, ["bazaar"]);
+  assert.match(discovery.payment_instructions.discovery_probe, /no body/i);
+  assert.match(discovery.payment_instructions.authorization_expiry, /fresh authorization/i);
   assert.equal(validateRequest(challenge.extensions.bazaar.info.input.body).ok, true);
   assert.ok(r.headers.get("PAYMENT-REQUIRED").length < 16000);
 });
@@ -37,6 +43,9 @@ test("OpenAPI announces x402, atomic terms and an executable synthetic example",
   assert.equal(op["x-x402"].accepts[0].amount, "20000");
   assert.equal(op["x-x402"].x402Version, 2);
   assert.equal(op["x-x402"].unknown_is_free, true);
+  assert.deepEqual(op["x-x402"].envelope.required_top_level, ["x402Version", "accepted", "payload", "extensions"]);
+  assert.match(s.components.securitySchemes.paymentSignature.description, /complete live accepts\[0\]/);
+  assert.match(s.components.securitySchemes.paymentSignature.description, /bazaar/);
   assert.equal(validateRequest(op.requestBody.content["application/json"].example).ok, true);
   const off = await (await worker.fetch(new Request("https://rc.example/openapi.json"), { ...ENV, X402_ENABLED: "false" })).json();
   assert.equal(off.paths["/v1/check"].post["x-payment-info"], undefined);
