@@ -51,6 +51,26 @@ export function payment(c, m) {
     'envelope'
   );
   paymentTerms(c, envelope.accepted, expected, 'accepted');
+  const acceptedKeys = object(envelope.accepted) ? Object.keys(envelope.accepted).sort() : [];
+  const canonicalAcceptedKeys = ['amount', 'asset', 'extra', 'maxTimeoutSeconds', 'network', 'payTo', 'scheme'];
+  c.check(
+    acceptedKeys.length === canonicalAcceptedKeys.length &&
+      acceptedKeys.every((key, i) => key === canonicalAcceptedKeys[i]),
+    'PAYMENT_ACCEPTED_SHAPE',
+    'accepted'
+  );
+  c.check(
+    Number.isSafeInteger(envelope.accepted?.maxTimeoutSeconds) && envelope.accepted.maxTimeoutSeconds > 0,
+    'PAYMENT_ACCEPTED_TIMEOUT',
+    'accepted.maxTimeoutSeconds'
+  );
+  c.check(
+    object(envelope.accepted?.extra) &&
+      nonempty(envelope.accepted.extra.name) &&
+      nonempty(envelope.accepted.extra.version),
+    'PAYMENT_ACCEPTED_EXTRA',
+    'accepted.extra'
+  );
   c.check(envelope.x402Version === 2, 'X402_VERSION', 'x402Version');
   const extensionKeys = object(envelope.extensions) ? Object.keys(envelope.extensions) : [];
   c.check(
