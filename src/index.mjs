@@ -722,7 +722,7 @@ function openapi(env) {
     components: {
       securitySchemes: {
         bearerAuth: { type: "http", scheme: "bearer" },
-        paymentSignature: { type: "apiKey", in: "header", name: "PAYMENT-SIGNATURE", description: 'Base64 x402 v2 PaymentPayload. Required identifier: extensions["payment-identifier"].info.id. Legacy payload.extensions["payment-identifier"] string remains accepted. Signed calls bypass the free allowance; UNKNOWN is not settled.' },
+        paymentSignature: { type: "apiKey", in: "header", name: "PAYMENT-SIGNATURE", description: 'Base64 JSON x402 v2 client envelope: x402Version + accepted (complete live accepts[0]) + payload {signature, authorization} + extensions["payment-identifier"].info.id. Do not copy the bazaar discovery extension into this header. Legacy payload.extensions["payment-identifier"] remains server-compatible but is not the canonical form. Signed calls bypass the free allowance; UNKNOWN is not settled.' },
       },
       schemas: {
         Error: ERROR_SCHEMA,
