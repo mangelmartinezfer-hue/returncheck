@@ -51,6 +51,60 @@ a different page. Opened-product alternatives are recovered only for an explicit
 adjacent generic clause; ambiguous, category-specific or conflicting terms still
 require the normal verification path.
 
+## x402 paid calls
+
+The paid HTTP route is the same endpoint: `POST /v1/check`.
+
+To inspect the live x402 terms without consuming the free allowance, send a
+**bodyless** `POST /v1/check` with no `PAYMENT-SIGNATURE`. ReturnCheck responds
+with the live 402 challenge. Do not send `{}` or a real check body for this
+discovery probe.
+
+For a paid call, base64-encode a JSON envelope in the `PAYMENT-SIGNATURE` header:
+
+```json
+{
+  "x402Version": 2,
+  "accepted": { "...": "the complete accepts[0] from the live 402 challenge" },
+  "payload": {
+    "signature": "0x...",
+    "authorization": {
+      "from": "0x...",
+      "to": "0x...",
+      "value": "20000",
+      "validAfter": "0",
+      "validBefore": "...",
+      "nonce": "0x..."
+    }
+  },
+  "extensions": {
+    "payment-identifier": {
+      "info": {
+        "required": true,
+        "id": "unique-id-16-to-128-chars"
+      }
+    }
+  }
+}
+```
+
+Rules:
+
+- `accepted` is the full accepted payment requirement object, not a boolean.
+- `payload` directly contains `signature` and `authorization`.
+- The canonical identifier path is
+  `extensions["payment-identifier"].info.id`.
+- Do not copy the `bazaar` discovery extension into `PAYMENT-SIGNATURE`.
+- The live 402 challenge is authoritative for current payment terms.
+- A signed request enters the payment path directly; there is no need to exhaust
+  the free allowance first.
+- Replay the same paid operation with the same endpoint, body, identifier,
+  signature and nonce. If an authorization expires before the paid call, sign a
+  fresh authorization; that fresh authorization is then the one to replay.
+- On `pending`, `unconfirmed`, HTTP 500, or another ambiguous settlement
+  outcome, do not create a second authorization until the first outcome is
+  reconciled.
+
 ## What you get back
 
 ```json
