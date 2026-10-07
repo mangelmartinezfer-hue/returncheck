@@ -90,7 +90,7 @@ El sobre es el JSON x402 que el cliente codifica en base64 para `PAYMENT-SIGNATU
 Su forma canónica tiene exactamente cuatro claves de nivel superior:
 `x402Version`, `accepted`, `payload` y `extensions`.
 
-- `accepted` es el objeto completo de requisitos de pago aceptados por el cliente.
+- `accepted` es el objeto completo de `accepts[0]` del 402 vivo: `scheme`, `network`, `amount`, `asset`, `payTo`, `maxTimeoutSeconds` y `extra`. No se añaden campos como `endpoint`.
 - `payload` contiene directamente `signature` y `authorization`.
 - `extensions["payment-identifier"].info.id` es la ubicación canónica del identificador.
 - No se incluye `resource` en el sobre del cliente: ReturnCheck fija su propio recurso antes de hablar con el facilitador.
