@@ -65,7 +65,15 @@ For a paid call, base64-encode a JSON envelope in the `PAYMENT-SIGNATURE` header
 ```json
 {
   "x402Version": 2,
-  "accepted": { "...": "the complete accepts[0] from the live 402 challenge" },
+  "accepted": {
+    "scheme": "exact",
+    "network": "eip155:8453",
+    "amount": "20000",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "payTo": "0xbF428071027402E9b0cE85e22146EDdc028cEB3b",
+    "maxTimeoutSeconds": 60,
+    "extra": { "name": "USD Coin", "version": "2" }
+  },
   "payload": {
     "signature": "0x...",
     "authorization": {
