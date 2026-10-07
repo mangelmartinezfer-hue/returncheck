@@ -16,7 +16,16 @@ function fixture(t, profile = 'payment') {
   const write = (path, data) => writeFileSync(join(dir, path), typeof data === 'string' ? data : JSON.stringify(data));
   const body = '{"as_of":"2026-10-02"}';
   const expected = { scheme: 'exact', network: 'eip155:8453', asset: '0x' + '1'.repeat(40), payTo: '0x' + '2'.repeat(40), amount: '20000', endpoint: 'https://example.com/v1/check' };
-  const envelope = { x402Version: 2, accepted: { ...expected }, extensions: { 'payment-identifier': { info: { id: 'payment_123456789' } } }, payload: { signature: 'DO_NOT_PRINT_SECRET', authorization: { nonce: 'nonce' } } };
+  const accepted = {
+    scheme: expected.scheme,
+    network: expected.network,
+    amount: expected.amount,
+    asset: expected.asset,
+    payTo: expected.payTo,
+    maxTimeoutSeconds: 60,
+    extra: { name: 'USD Coin', version: '2' },
+  };
+  const envelope = { x402Version: 2, accepted, extensions: { 'payment-identifier': { info: { id: 'payment_123456789' } } }, payload: { signature: 'DO_NOT_PRINT_SECRET', authorization: { nonce: 'nonce' } } };
   const source = 'Opened items may be returned within 30 days.';
   const record = { id: 'case-1', synthetic: true, split: 'development', as_of: '2026-10-02', item_condition: 'opened', reason: 'changed_mind', seller: 'Example', marketplace: 'none', expected: 'YES_WITH_CONDITIONS', exact_clause: source, source: { file: 'source.txt', sha256: sha256(source), url: 'https://example.com/policy', captured_at: '2026-10-01' }, claims: { days: { value: 30, quote: source } } };
   const m = profile === 'payment' ? { schema_version: 1, profile, mode: 'package', expected, body_file: 'body.json', body_sha256: sha256(body), body_bytes: Buffer.byteLength(body), as_of: '2026-10-02', envelope_file: 'envelope.json', replay: { body_file: 'replay-body.json', envelope_file: 'replay-envelope.json', endpoint: expected.endpoint } } : { schema_version: 1, profile, mode: 'intake', records: [record] };
@@ -43,6 +52,11 @@ const paymentFailures = [
   ['recipient', f => { f.envelope.accepted.payTo = 'wrong'; }, 'PAYMENT_TERMS'],
   ['network', f => { f.envelope.accepted.network = 'base'; }, 'PAYMENT_TERMS'],
   ['asset', f => { f.envelope.accepted.asset = 'wrong'; }, 'PAYMENT_TERMS'],
+  ['accepted missing timeout', f => { delete f.envelope.accepted.maxTimeoutSeconds; }, 'PAYMENT_ACCEPTED_SHAPE'],
+  ['accepted missing extra', f => { delete f.envelope.accepted.extra; }, 'PAYMENT_ACCEPTED_SHAPE'],
+  ['accepted carries endpoint', f => { f.envelope.accepted.endpoint = f.m.expected.endpoint; }, 'PAYMENT_ACCEPTED_SHAPE'],
+  ['accepted timeout invalid', f => { f.envelope.accepted.maxTimeoutSeconds = 0; }, 'PAYMENT_ACCEPTED_TIMEOUT'],
+  ['accepted token domain incomplete', f => { delete f.envelope.accepted.extra.version; }, 'PAYMENT_ACCEPTED_EXTRA'],
   ['old nested envelope', f => {
     const old = structuredClone(f.envelope);
     f.envelope = {
