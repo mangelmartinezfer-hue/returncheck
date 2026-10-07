@@ -16,7 +16,7 @@ function fixture(t, profile = 'payment') {
   const write = (path, data) => writeFileSync(join(dir, path), typeof data === 'string' ? data : JSON.stringify(data));
   const body = '{"as_of":"2026-10-02"}';
   const expected = { scheme: 'exact', network: 'eip155:8453', asset: '0x' + '1'.repeat(40), payTo: '0x' + '2'.repeat(40), amount: '20000', endpoint: 'https://example.com/v1/check' };
-  const envelope = { x402Version: 2, accepted: { ...expected }, resource: { url: expected.endpoint }, extensions: { 'payment-identifier': { info: { id: 'payment_123456789' } } }, payload: { signature: 'DO_NOT_PRINT_SECRET', authorization: { nonce: 'nonce' } } };
+  const envelope = { x402Version: 2, accepted: { ...expected }, extensions: { 'payment-identifier': { info: { id: 'payment_123456789' } } }, payload: { signature: 'DO_NOT_PRINT_SECRET', authorization: { nonce: 'nonce' } } };
   const source = 'Opened items may be returned within 30 days.';
   const record = { id: 'case-1', synthetic: true, split: 'development', as_of: '2026-10-02', item_condition: 'opened', reason: 'changed_mind', seller: 'Example', marketplace: 'none', expected: 'YES_WITH_CONDITIONS', exact_clause: source, source: { file: 'source.txt', sha256: sha256(source), url: 'https://example.com/policy', captured_at: '2026-10-01' }, claims: { days: { value: 30, quote: source } } };
   const m = profile === 'payment' ? { schema_version: 1, profile, mode: 'package', expected, body_file: 'body.json', body_sha256: sha256(body), body_bytes: Buffer.byteLength(body), as_of: '2026-10-02', envelope_file: 'envelope.json', replay: { body_file: 'replay-body.json', envelope_file: 'replay-envelope.json', endpoint: expected.endpoint } } : { schema_version: 1, profile, mode: 'intake', records: [record] };
@@ -43,7 +43,18 @@ const paymentFailures = [
   ['recipient', f => { f.envelope.accepted.payTo = 'wrong'; }, 'PAYMENT_TERMS'],
   ['network', f => { f.envelope.accepted.network = 'base'; }, 'PAYMENT_TERMS'],
   ['asset', f => { f.envelope.accepted.asset = 'wrong'; }, 'PAYMENT_TERMS'],
-  ['endpoint', f => { f.envelope.resource.url = 'https://wrong.example'; }, 'ENDPOINT_MISMATCH'],
+  ['old nested envelope', f => {
+    const old = structuredClone(f.envelope);
+    f.envelope = {
+      x402Version: 2,
+      scheme: old.accepted.scheme,
+      network: old.accepted.network,
+      payload: { signature: old.payload.signature, authorization: old.payload.authorization },
+      extensions: old.extensions,
+    };
+  }, 'PAYMENT_ENVELOPE_SHAPE'],
+  ['resource copied into client envelope', f => { f.envelope.resource = { url: f.m.expected.endpoint }; }, 'PAYMENT_ENVELOPE_SHAPE'],
+  ['bazaar copied into client envelope', f => { f.envelope.extensions.bazaar = { info: {} }; }, 'PAYMENT_CLIENT_EXTENSIONS'],
   ['id path', f => { delete f.envelope.extensions; }, 'IDENTIFIER_INVALID'],
   ['id regex', f => { f.envelope.extensions['payment-identifier'].info.id = 'too-short'; }, 'IDENTIFIER_INVALID'],
   ['legacy conflict', f => { f.envelope.payload.extensions = { 'payment-identifier': 'different' }; }, 'IDENTIFIER_CONFLICT'],
