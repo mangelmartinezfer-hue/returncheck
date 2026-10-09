@@ -5,10 +5,11 @@
 // sin ella no puede decir QUÉ build dio una respuesta concreta. Es el dato que
 // convierte "respondimos mal" en "respondimos mal con este código, y lo
 // arreglamos en este otro".
-// Se actualiza en el mismo commit que cambia el comportamiento publicado. Una
-// prueba de routes.test.mjs impide que /discovery.json vuelva a anunciar un
-// build anterior a la corrección del contrato de cliente x402 (PR #15).
-export const BUILD = "2026-10-09-post-pr15-sobre-x402-cliente";
+// Se actualiza en el mismo commit que cambia lo que el servicio publica o cómo
+// responde: el contrato, una ruta pública nueva, el motor. No hace falta tocarlo
+// por un cambio que no se ve desde fuera. Una prueba de routes.test.mjs impide
+// que /discovery.json vuelva a anunciar el marcador de septiembre.
+export const BUILD = "2026-10-09-fichas-ikea-y-prueba-de-pago";
 
 export function nowISO() {
   return new Date().toISOString();

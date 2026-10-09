@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "profile": "artifact",
+  "mode": "intake",
+  "purpose": "Ficha de evidencia publica de la politica de devoluciones de IKEA US, mas las dos capturas que la respaldan. Dato, no codigo. Las dos paginas publicas de IKEA US se recapturaron con navegador real el 9-oct-2026 y se conservan aqui: la corta, que es la unica que tenia el corpus del 28-ago, y la completa, que anade exclusiones, una tercera ventana para colchones y requisitos de identificacion. test/ficha-ikea.test.mjs exige que cada clausula y cada exclusion publicadas aparezcan literalmente en esas capturas, que la clausula de 365/180 del 28-ago siga viva palabra por palabra, que la pagina corta no contenga las exclusiones de la completa, y que ninguna de las dos diga desde que evento corre el plazo, que es por lo que basis va a null en los tres casos.",
+  "files": [
+    {
+      "path": "cards/rc-card-ikea-365-or-180.mjs",
+      "sha256": "fedaf4d5411d98057dc4219a69efac4f104969ada2a0ebb1d65a848efa495f41",
+      "bytes": 6115,
+      "format": "text"
+    },
+    {
+      "path": "test/fixtures/ikea-how-to-return-2026-10-09.txt",
+      "sha256": "6d08f5e4da1394c20981b931f16bdb62c7a0085530754d35c544a760aa0089c0",
+      "bytes": 1440,
+      "format": "text"
+    },
+    {
+      "path": "test/fixtures/ikea-return-policy-2026-10-09.txt",
+      "sha256": "5c2d24f1471f3f5d793aa66d31c0249c9451ab4f5add7202ddd989f50c14a0a1",
+      "bytes": 2060,
+      "format": "text"
+    }
+  ]
+}

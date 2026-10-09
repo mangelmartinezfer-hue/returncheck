@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "manifest": "preflight/jobs/ficha-ikea-365-or-180.json",
+  "binding": "d1a741eb61d2fb4c77731fcffd36c54aedacd59c204159d52868b9277e786e35",
+  "reviewer": "Miguel Ángel Martínez",
+  "reviewed_at": "2026-10-09",
+  "verdict": "APPROVE",
+  "rationale": "Las cláusulas y exclusiones publicadas son palabras literales de IKEA, recapturadas el 9-oct-2026 y conservadas en el repositorio. Una prueba automática verifica cada cita contra esas capturas. He leído la página renderizada.",
+  "resolutions": [
+    {
+      "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
+      "decision": "VERIFIED",
+      "reason": "Cada cita está comprobada contra la captura por test/ficha-ikea.test.mjs. basis va a null porque ninguna de las dos páginas de IKEA declara el inicio del plazo."
+    },
+    {
+      "key": "INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION:files",
+      "decision": "ACCEPTED_LIMITATION",
+      "reason": "El perfil artifact solo comprueba integridad. No existe todavía un perfil de dominio para fichas de evidencia. La comprobación de significado la aportan las pruebas de la ficha y esta revisión."
+    }
+  ]
+}

@@ -22,9 +22,15 @@
 import cardTarget from "../cards/rc-card-target-who-sold-it.mjs";
 import cardEbay from "../cards/rc-card-ebay-seller-decides.mjs";
 import cardCostco from "../cards/rc-card-costco-satisfaction-guaranteed.mjs";
+import cardIkea from "../cards/rc-card-ikea-365-or-180.mjs";
+
+// Fecha de la conciliacion on-chain de la prueba de pago. Vive aqui solo para el
+// sitemap; el objeto entero esta en prueba-de-pago.mjs y no se importa para no
+// crear un ciclo (prueba-de-pago.mjs ya importa envuelve de este fichero).
+const PRUEBA_RECONCILIADA = "2026-10-07";
 
 // El registro. Anadir una ficha = anadir su fichero y una linea aqui.
-const FICHAS = [cardTarget, cardEbay, cardCostco];
+const FICHAS = [cardTarget, cardEbay, cardCostco, cardIkea];
 
 export const CARDS = new Map(FICHAS.map((c) => [c.card_id, c]));
 
@@ -219,7 +225,9 @@ const CABEZA_FUENTES =
   '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>' +
   '<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">';
 
-function envuelve({ title, description, canonical, alternateJson, jsonld, cuerpo }) {
+// Exportada para que la prueba de pago use ESTA hoja de estilo y no una copia.
+// Una sola tipografia y una sola paleta en todo lo publico.
+export function envuelve({ title, description, canonical, alternateJson, jsonld, cuerpo }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -449,6 +457,8 @@ export function sitemap(base) {
       loc: base + "/cards/" + c.card_id,
       lastmod: c.verified_on,
     })),
+    // La prueba de pago no es una ficha, pero es contenido publico y citable.
+    { loc: base + "/proof-of-payment", lastmod: PRUEBA_RECONCILIADA },
   ];
   const cuerpo = urls
     .map(

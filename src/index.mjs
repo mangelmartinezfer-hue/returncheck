@@ -16,6 +16,7 @@ import { freeTrial } from "./freetier.mjs";
 import { readMetrics } from "./metrics.mjs";
 import { json, errorResponse, todayDate, BUILD } from "./util.mjs";
 import { faviconIco, faviconSvg } from "./icono.mjs";
+import { paginaPruebaPago, pruebaPagoJson } from "./prueba-de-pago.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
@@ -1173,6 +1174,12 @@ export default {
         return cardsIndex(env, url);
       if (request.method === "GET" && p === "/cards.json") return cardsIndexJson(env, url);
       if (request.method === "GET" && p.startsWith("/cards/")) return cardRoute(env, url, p);
+      // Prueba de pago externa. Lectura publica, sin clave y sin coste, igual que
+      // las fichas. No es una politica, por eso no vive en /cards.
+      if (request.method === "GET" && p === "/proof-of-payment.json")
+        return json(pruebaPagoJson(baseDe(env, url)), { headers: CARD_HEADERS });
+      if (request.method === "GET" && p === "/proof-of-payment")
+        return htmlResponse(paginaPruebaPago(baseDe(env, url)));
       if (request.method === "GET" && p === "/sitemap.xml") return sitemapXml(env, url);
       if (request.method === "GET" && p === "/robots.txt") return robotsTxt(env, url);
       // Panel de control (protegido con clave de administrador).
