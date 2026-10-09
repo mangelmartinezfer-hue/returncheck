@@ -100,6 +100,31 @@ test("descubrimiento: /discovery.json publica el build vigente, no uno anterior"
   assert.notEqual(j.build, "2026-09-03-w56-resource-en-el-sobre");
 });
 
+// Los directorios de x402 leen /favicon.ico de la raíz de la API para mostrar
+// la ficha, y el contacto de OpenAPI para acreditar su propiedad. Sin esto, la
+// ficha pública sale sin icono y sin dueño demostrable.
+test("ficha pública: /favicon.ico devuelve una imagen real", async () => {
+  const r = await get("/favicon.ico");
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type") || "", /^image\//);
+  const b = new Uint8Array(await r.arrayBuffer());
+  assert.ok(b.length > 100);
+  assert.deepEqual([...b.slice(0, 4)], [0x89, 0x50, 0x4e, 0x47]); // firma PNG
+});
+
+test("ficha pública: /favicon.svg devuelve el mismo dibujo en vectorial", async () => {
+  const r = await get("/favicon.svg");
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type") || "", /image\/svg\+xml/);
+  assert.match(await r.text(), /^<svg /);
+});
+
+test("ficha pública: openapi.json publica el contacto del servicio", async () => {
+  const j = await (await get("/openapi.json")).json();
+  assert.equal(j.info.contact.email, "returncheckteam@gmail.com");
+  assert.equal(j.info.contact.url, "https://rc.example");
+});
+
 test("descubrimiento: agents.json enlaza el aviso y lleva el correo real", async () => {
   const j = await (await get("/agents.json")).json();
   assert.equal(j.data_policy, "https://rc.example/data-policy");

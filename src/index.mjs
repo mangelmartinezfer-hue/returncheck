@@ -15,6 +15,7 @@ import { handleMcp } from "./mcp.mjs";
 import { freeTrial } from "./freetier.mjs";
 import { readMetrics } from "./metrics.mjs";
 import { json, errorResponse, todayDate, BUILD } from "./util.mjs";
+import { faviconIco, faviconSvg } from "./icono.mjs";
 import { EVAL_CASES } from "./eval-cases.mjs";
 import { HOLDOUT_CASES } from "./holdout-cases.mjs";
 import { clauseInText } from "./text.mjs";
@@ -699,7 +700,14 @@ function openapi(env) {
   const base = env.PUBLIC_BASE_URL || "";
   const spec = {
     openapi: "3.1.0",
-    info: { title: "ReturnCheck", version: "1.0.0", description: "ReturnCheck verifies which return policy actually applies to this purchase. Never invents: returns UNKNOWN instead of guessing." },
+    // El contacto no es decorativo: los directorios de x402 lo usan para
+    // acreditar la propiedad de la ficha y para que quien la vea pueda escribir.
+    info: {
+      title: "ReturnCheck",
+      version: "1.0.0",
+      description: "ReturnCheck verifies which return policy actually applies to this purchase. Never invents: returns UNKNOWN instead of guessing.",
+      contact: { name: "ReturnCheck", email: env.CONTACT_EMAIL || "", ...(base ? { url: base } : {}) },
+    },
     servers: [{ url: base }],
     paths: {
       "/v1/check": {
@@ -1150,6 +1158,9 @@ export default {
           ? json(discoveryDocument(env), { headers: { "access-control-allow-origin": "*", vary: "accept" } })
           : landingPage(env, url);
       if (request.method === "GET" && (p === "/openapi.json" || p === "/.well-known/openapi.json")) return openapi(env);
+      // Icono del servicio: los directorios de x402 leen /favicon.ico de la raíz.
+      if (request.method === "GET" && p === "/favicon.ico") return faviconIco();
+      if (request.method === "GET" && p === "/favicon.svg") return faviconSvg();
       if (request.method === "GET" && (p === "/.well-known/ai-plugin.json" || p === "/ai-plugin.json")) return aiPluginJson(env);
       if (request.method === "GET" && (p === "/agents.json" || p === "/.well-known/agents.json")) return agentsJson(env);
       // W48 — terminos de pago x402, publicos y sin autenticacion.
