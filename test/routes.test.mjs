@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.mjs";
+import { BUILD } from "../src/util.mjs";
 
 const ENV = {
   PUBLIC_BASE_URL: "https://rc.example",
@@ -87,6 +88,16 @@ test("descubrimiento: /discovery.json enlaza el aviso y el MCP", async () => {
   assert.equal(j.data_policy, "https://rc.example/data-policy");
   assert.equal(j.mcp_endpoint, "https://rc.example/mcp");
   assert.equal(j.unknown_is_free, true);
+});
+
+// El build publicado no es cosmético: es el mismo valor que answer_log guarda
+// para poder decir QUÉ código dio una respuesta concreta. Si se queda atrás,
+// /discovery.json miente y el registro apunta a un código que ya no corre.
+test("descubrimiento: /discovery.json publica el build vigente, no uno anterior", async () => {
+  const j = await (await get("/discovery.json")).json();
+  assert.equal(j.build, BUILD);
+  assert.match(j.build, /^\d{4}-\d{2}-\d{2}-/);
+  assert.notEqual(j.build, "2026-09-03-w56-resource-en-el-sobre");
 });
 
 test("descubrimiento: agents.json enlaza el aviso y lleva el correo real", async () => {

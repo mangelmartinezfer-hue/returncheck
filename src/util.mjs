@@ -5,7 +5,10 @@
 // sin ella no puede decir QUÉ build dio una respuesta concreta. Es el dato que
 // convierte "respondimos mal" en "respondimos mal con este código, y lo
 // arreglamos en este otro".
-export const BUILD = "2026-09-03-w56-resource-en-el-sobre";
+// Se actualiza en el mismo commit que cambia el comportamiento publicado. Una
+// prueba de routes.test.mjs impide que /discovery.json vuelva a anunciar un
+// build anterior a la corrección del contrato de cliente x402 (PR #15).
+export const BUILD = "2026-10-09-post-pr15-sobre-x402-cliente";
 
 export function nowISO() {
   return new Date().toISOString();
