@@ -13,7 +13,7 @@ import { getClient, chargeAtomic, markFree, createClient } from "./billing.mjs";
 import { handleStripeWebhook } from "./stripe.mjs";
 import { handleMcp } from "./mcp.mjs";
 import { freeTrial } from "./freetier.mjs";
-import { readMetrics } from "./metrics.mjs";
+import { readMetrics, bumpMetric } from "./metrics.mjs";
 import { json, errorResponse, todayDate, BUILD } from "./util.mjs";
 import { faviconIco, faviconSvg } from "./icono.mjs";
 import { paginaPruebaPago, pruebaPagoJson } from "./prueba-de-pago.mjs";
@@ -1127,9 +1127,52 @@ load();
 </script></body></html>`;
 
 export default {
+  // W58 — CONTADORES DE DESCUBRIMIENTO.
+  //
+  // EL AGUJERO QUE CIERRAN: `recordAnswer` y `recordCheck` corren al final del
+  // motor, asi que solo deja rastro lo que llego a producir un veredicto. Un 402
+  // no deja ninguno. Un agente que nos encuentre en un directorio, lea los
+  // terminos, mire el precio y se vaya no existia para la base de datos. Sin ese
+  // numero, cuatro semanas sin un solo pago no distinguen "no me ha encontrado
+  // nadie" de "me han encontrado y no han convertido", que son dos problemas
+  // opuestos.
+  //
+  // POR QUE AQUI Y NO EN CADA SITIO QUE DEVUELVE UN 402: porque aqui no se puede
+  // olvidar ninguno. Se mira el `status` de la respuesta ya construida, sea cual
+  // sea la rama que la hizo, y lo seguira contando cuando se anada otra.
+  //
+  // LO QUE NO CUENTAN, dicho para que nadie lea de mas en el numero: el reto del
+  // MCP viaja dentro de un 200 con cuerpo JSON-RPC, no es un 402 HTTP, y por
+  // tanto no entra. Los registros de Cloudflare siguen siendo el contraste, pero
+  // caducan; estos contadores no.
+  //
+  // NO TOCAN NADA: ni pagos, ni liquidacion, ni contrato, ni veredictos. Se
+  // cuentan DESPUES de que la respuesta este hecha, y `bumpMetric` se traga sus
+  // propios errores, asi que un fallo de metricas no puede romper una consulta.
   async fetch(request, env) {
     const url = new URL(request.url);
     const p = url.pathname;
+    const respuesta = await despachar(request, env, url, p);
+    try {
+      if (respuesta && respuesta.status === 402) await bumpMetric(env, "x402_402_total");
+      else if (request.method === "GET" && RUTAS_DESCUBRIMIENTO.has(p) && respuesta && respuesta.status === 200)
+        await bumpMetric(env, "discovery_reads_total");
+    } catch (_) { /* las metricas nunca rompen nada */ }
+    return respuesta;
+  },
+};
+
+// Las tres superficies publicas por las que un agente nos descubre antes de
+// llamar: el contrato OpenAPI, los terminos de pago x402 y la ficha de
+// descubrimiento. Solo se cuenta el GET que de verdad devolvio 200.
+const RUTAS_DESCUBRIMIENTO = new Set([
+  "/openapi.json",
+  "/.well-known/openapi.json",
+  "/.well-known/x402",
+  "/discovery.json",
+]);
+
+async function despachar(request, env, url, p) {
     try {
       if (request.method === "POST" && p === "/v1/signup") return await handleSignup(request, env);
       if (request.method === "POST" && (p === "/v1/check" || p === "/v1/check_return")) return await handleCheck(request, env);
@@ -1354,5 +1397,4 @@ export default {
     } catch (e) {
       return errorResponse("INTERNAL", "Unexpected error.", 500);
     }
-  },
-};
+}
