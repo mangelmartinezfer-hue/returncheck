@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "manifest": "preflight/jobs/ficha-ebay-contexto.json",
+  "binding": "efd8a1e88157036eb5249bb2f4d2b763e30178917756990270d64d9ee3a0cb62",
+  "reviewer": "Codex - revision local por IA, no aprobacion de Miguel",
+  "reviewed_at": "2026-10-09",
+  "verdict": "APPROVE",
+  "rationale": "Revision IA local de la version 3: se conserva days 30, basis es null tanto en la salida JSON como en su gemelo HTML. Las ramas sin numero siguen omitiendo ambos campos. Cita, fecha historica y limites se conservan. Las 31 pruebas de fichas pasan. No es aprobacion humana ni autorizacion de despliegue; no se cambia src/BUILD ni recibos de trabajos ajenos.",
+  "resolutions": [
+    {
+      "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
+      "decision": "VERIFIED",
+      "reason": "Revisados days 30 y basis null en la segunda rama, sin origen unico; retirada de afirmaciones universales en ejemplo, titulo y cobertura. Las pruebas nuevas detectan la perdida del numero en v2 y exigen conservarlo junto con los matices y la elegibilidad. No se calcula deadline ni se declara UCP conforme."
+    },
+    {
+      "key": "INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION:files",
+      "decision": "ACCEPTED_LIMITATION",
+      "reason": "El perfil verifica integridad, no verdad comercial. Se acepta ese limite: revision semantica local por IA mas pruebas de renderizado HTML/JSON; publicacion y nueva captura quedan pendientes."
+    }
+  ]
+}

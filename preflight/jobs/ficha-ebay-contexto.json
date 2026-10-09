@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "profile": "artifact",
+  "mode": "intake",
+  "purpose": "Correccion de la ficha eBay: conservar la duracion citada days 30 con basis null, sin reducir estimated/actual a delivery ni prometer cobertura universal. Se mantienen citas y fechas historicas. Pruebas HTML y JSON en test/ebay-context.test.mjs. No es recaptura ni validacion de compra, y no modifica src ni BUILD.",
+  "files": [
+    {
+      "path": "cards/rc-card-ebay-seller-decides.mjs",
+      "sha256": "f1f6c2b47c9e5b653b9975911642cdf44e79654e918e6adfd2f495b54921e3cd",
+      "bytes": 4972,
+      "format": "text"
+    }
+  ]
+}

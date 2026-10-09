@@ -182,8 +182,9 @@ test("SIN NUMERO INVENTADO: si la clausula no da plazo, no hay `days` ni `basis`
   // leerian como cero dias o como un fallo.
   assert.equal("days" in j.outcomes[0], false);
   assert.equal("basis" in j.outcomes[0], false);
+  // Se conserva la cifra de la segunda cita sin inventar un ancla unica.
   assert.equal(j.outcomes[1].days, 30);
-  assert.equal(j.outcomes[1].basis, "delivery");
+  assert.equal(j.outcomes[1].basis, null);
   assert.equal("days" in j.outcomes[2], false);
 });
 
