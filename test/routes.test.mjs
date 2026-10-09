@@ -100,6 +100,40 @@ test("descubrimiento: /discovery.json publica el build vigente, no uno anterior"
   assert.notEqual(j.build, "2026-09-03-w56-resource-en-el-sobre");
 });
 
+// La prueba de pago dice cosas comprobables por cualquiera en la cadena. Si la
+// página y su gemelo JSON pudieran discrepar, la prueba no valdría nada: estas
+// pruebas vigilan que los dos salgan del mismo objeto y que no se pierda el hash
+// de la transacción, que es lo único que permite a un tercero verificarlo solo.
+test("prueba de pago: la página publica la transacción y cómo comprobarla", async () => {
+  const r = await get("/proof-of-payment");
+  assert.equal(r.status, 200);
+  const t = await r.text();
+  assert.match(t, /0xdc577f237a8502d25771baceda86738a9b2eb5f516e11f51a314f8dbfe751291/);
+  assert.match(t, /basescan\.org/);
+  assert.match(t, /0\.02 USDC/);
+});
+
+test("prueba de pago: el gemelo JSON lleva los mismos datos", async () => {
+  const j = await (await get("/proof-of-payment.json")).json();
+  assert.equal(j.transaction, "0xdc577f237a8502d25771baceda86738a9b2eb5f516e11f51a314f8dbfe751291");
+  assert.equal(j.receipt_status, "0x1");
+  assert.equal(j.block, 52260342);
+  assert.equal(j.amount_atomic, "20000");
+  assert.equal(j.pay_to, "0xbF428071027402E9b0cE85e22146EDdc028cEB3b");
+  assert.equal(j.replay.second_charge, false);
+  assert.equal(j.reconciliation.matching_transfers, 1);
+});
+
+// No se publica el nombre del pagador sin su consentimiento. Su dirección sí, que
+// es pública en la cadena. Una prueba lo vigila para que no se cuele en una
+// edición futura.
+test("prueba de pago: no se publica el nombre del pagador", async () => {
+  const t = await (await get("/proof-of-payment")).text();
+  assert.doesNotMatch(t, /mitaka/i);
+  const j = await (await get("/proof-of-payment.json")).json();
+  assert.doesNotMatch(JSON.stringify(j), /mitaka/i);
+});
+
 // Los directorios de x402 leen /favicon.ico de la raíz de la API para mostrar
 // la ficha, y el contacto de OpenAPI para acreditar su propiedad. Sin esto, la
 // ficha pública sale sin icono y sin dueño demostrable.
