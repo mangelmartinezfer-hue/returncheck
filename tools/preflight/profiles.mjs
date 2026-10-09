@@ -42,9 +42,42 @@ export function payment(c, m) {
   const parsed = JSON.parse(body.toString('utf8'));
   c.check(date(m.as_of) && parsed.as_of === m.as_of, 'AS_OF_MISMATCH', 'as_of');
   const envelope = c.json(m.envelope_file);
+  const envelopeKeys = object(envelope) ? Object.keys(envelope).sort() : [];
+  const canonicalEnvelopeKeys = ['accepted', 'extensions', 'payload', 'x402Version'];
+  c.check(
+    envelopeKeys.length === canonicalEnvelopeKeys.length &&
+      envelopeKeys.every((key, i) => key === canonicalEnvelopeKeys[i]),
+    'PAYMENT_ENVELOPE_SHAPE',
+    'envelope'
+  );
   paymentTerms(c, envelope.accepted, expected, 'accepted');
+  const acceptedKeys = object(envelope.accepted) ? Object.keys(envelope.accepted).sort() : [];
+  const canonicalAcceptedKeys = ['amount', 'asset', 'extra', 'maxTimeoutSeconds', 'network', 'payTo', 'scheme'];
+  c.check(
+    acceptedKeys.length === canonicalAcceptedKeys.length &&
+      acceptedKeys.every((key, i) => key === canonicalAcceptedKeys[i]),
+    'PAYMENT_ACCEPTED_SHAPE',
+    'accepted'
+  );
+  c.check(
+    Number.isSafeInteger(envelope.accepted?.maxTimeoutSeconds) && envelope.accepted.maxTimeoutSeconds > 0,
+    'PAYMENT_ACCEPTED_TIMEOUT',
+    'accepted.maxTimeoutSeconds'
+  );
+  c.check(
+    object(envelope.accepted?.extra) &&
+      nonempty(envelope.accepted.extra.name) &&
+      nonempty(envelope.accepted.extra.version),
+    'PAYMENT_ACCEPTED_EXTRA',
+    'accepted.extra'
+  );
   c.check(envelope.x402Version === 2, 'X402_VERSION', 'x402Version');
-  c.check(envelope.resource?.url === expected.endpoint, 'ENDPOINT_MISMATCH', 'resource.url');
+  const extensionKeys = object(envelope.extensions) ? Object.keys(envelope.extensions) : [];
+  c.check(
+    extensionKeys.length === 1 && extensionKeys[0] === 'payment-identifier',
+    'PAYMENT_CLIENT_EXTENSIONS',
+    'extensions'
+  );
   const id = envelope.extensions?.['payment-identifier']?.info?.id;
   c.check(typeof id === 'string' && identifier.test(id), 'IDENTIFIER_INVALID', 'extensions.payment-identifier.info.id');
   const legacy = envelope.payload?.extensions?.['payment-identifier'];

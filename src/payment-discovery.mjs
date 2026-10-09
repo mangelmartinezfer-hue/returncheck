@@ -58,12 +58,23 @@ export function paymentExtensions(url = "/v1/check") {
 }
 
 export const PAYMENT_INSTRUCTIONS = {
+  envelope: {
+    encoding: "base64-json",
+    required_top_level: ["x402Version", "accepted", "payload", "extensions"],
+    accepted_from: "Copy the complete accepts[0] object from the live 402 challenge.",
+    payload_shape: "payload directly contains signature and authorization; do not nest another PaymentPayload.",
+    client_extensions: ["payment-identifier"],
+    do_not_copy_extensions: ["bazaar"],
+    resource: "Clients do not need to send resource; ReturnCheck sets the served resource before facilitator verification.",
+  },
   identifier_path: 'extensions["payment-identifier"].info.id',
   legacy_identifier_path: 'payload.extensions["payment-identifier"]',
   identifier_required: true,
   identifier_pattern: "^[a-zA-Z0-9_-]{16,128}$",
   legacy_supported: true,
-  retry: "Reuse the same endpoint, body, identifier, signature and nonce. Conflicting identifiers are rejected. Never create a second authorization to recover an uncertain settlement.",
+  discovery_probe: "POST /v1/check with no body and no PAYMENT-SIGNATURE returns the live 402 challenge before free-trial accounting. Do not send {} or a real check body for discovery.",
+  retry: "After a paid attempt that may have reached settlement, reuse the same endpoint, body, identifier, signature and nonce; never create a second authorization to recover an uncertain outcome. If an authorization expires before any paid attempt is sent, sign a fresh one and use that exact fresh authorization for the later replay.",
+  authorization_expiry: "If the authorization expires before the paid call, sign a fresh authorization. If that fresh authorization settles, replay that exact new authorization, signature and nonce.",
   free_trial: "Unsigned requests may use the free allowance. PAYMENT-SIGNATURE enters the payment path directly; no need to exhaust the allowance.",
   unknown: "UNKNOWN is not settled.",
 };

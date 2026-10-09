@@ -86,14 +86,23 @@ Para `mode: "package"`, el manifiesto necesita:
 }
 ```
 
-El sobre es el JSON x402 decodificado: `x402Version: 2`, `resource.url`,
-`accepted`, `extensions["payment-identifier"].info.id`, `payload.signature` y
-`payload.authorization.nonce`. Se exige id de 16–128 caracteres alfanuméricos,
-guion o guion bajo; si existe la ubicación antigua, debe coincidir. Compara
-cuerpo y sobre de replay byte a byte: incluso un cambio de espacios falla.
-El endpoint de replay se compara por separado. La presencia de firma y nonce
-no verifica criptografía. Las condiciones `expected` deben revisarse contra
-una referencia independiente: no copiarlas automáticamente del sobre recibido.
+El sobre es el JSON x402 que el cliente codifica en base64 para `PAYMENT-SIGNATURE`.
+Su forma canónica tiene exactamente cuatro claves de nivel superior:
+`x402Version`, `accepted`, `payload` y `extensions`.
+
+- `accepted` es el objeto completo de `accepts[0]` del 402 vivo: `scheme`, `network`, `amount`, `asset`, `payTo`, `maxTimeoutSeconds` y `extra`. No se añaden campos como `endpoint`.
+- `payload` contiene directamente `signature` y `authorization`.
+- `extensions["payment-identifier"].info.id` es la ubicación canónica del identificador.
+- No se incluye `resource` en el sobre del cliente: ReturnCheck fija su propio recurso antes de hablar con el facilitador.
+- No se copia `bazaar` al sobre de pago. Bazaar es metadata de discovery.
+- No se admiten otras extensiones del cliente en este perfil.
+- La ubicación legacy `payload.extensions["payment-identifier"]` solo se tolera en el servidor por compatibilidad; no es la forma canónica de paquetes nuevos.
+
+Se exige id de 16–128 caracteres alfanuméricos, guion o guion bajo. Compara cuerpo
+y sobre de replay byte a byte: incluso un cambio de espacios falla. El endpoint
+de replay se compara por separado. La presencia de firma y nonce no verifica
+criptografía. Las condiciones `expected` deben revisarse contra una referencia
+independiente: no copiarlas automáticamente del sobre recibido.
 
 ### ucp
 

@@ -121,11 +121,10 @@ test("el reto lleva los campos exactos de la especificación v2", () => {
 // LA COMPROBACIÓN QUE NO SE DELEGA
 // ---------------------------------------------------------------------------
 
-function firmaCon(aceptado) {
+function firmaCon(aceptado, extra = {}) {
   return {
     headers: new Map([["PAYMENT-SIGNATURE", meterEnSobre({
       x402Version: 2,
-      resource: { url: "https://api.example.com/v1/check" },
       accepted: aceptado,
       payload: {
         signature: "0x2d6a75...",
@@ -135,6 +134,7 @@ function firmaCon(aceptado) {
           validAfter: "1740672089", validBefore: "1740672154", nonce: "0xf374",
         },
       },
+      ...extra,
     })]]),
   };
 }
@@ -146,10 +146,17 @@ const BUENO = {
   asset: USDC_SEPOLIA, payTo: MI_DIRECCION, maxTimeoutSeconds: 60,
 };
 
-test("firma correcta: se acepta", () => {
+test("firma correcta: se acepta sin resource enviado por el cliente", () => {
   const r = leerFirmaDePago(req(firmaCon(BUENO)), ENV);
   assert.equal(r.ok, true);
   assert.equal(pagadorDe(r.pago), "0x857b06519E91e3A54538791bDbb0E22373e36b66");
+  assert.equal(r.pago.resource.url, "/v1/check");
+});
+
+test("resource opcional del cliente no gobierna: ReturnCheck lo sustituye por el suyo", () => {
+  const r = leerFirmaDePago(req(firmaCon(BUENO, { resource: { url: "https://otro.example/pagar" } })), ENV);
+  assert.equal(r.ok, true);
+  assert.equal(r.pago.resource.url, "/v1/check");
 });
 
 test("EL ATAQUE QUE IMPORTA: el cliente rebaja la cantidad y firma eso", () => {
