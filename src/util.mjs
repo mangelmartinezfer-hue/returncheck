@@ -9,7 +9,7 @@
 // responde: el contrato, una ruta pública nueva, el motor. No hace falta tocarlo
 // por un cambio que no se ve desde fuera. Una prueba de routes.test.mjs impide
 // que /discovery.json vuelva a anunciar el marcador de septiembre.
-export const BUILD = "2026-10-09-fichas-ikea-y-prueba-de-pago";
+export const BUILD = "2026-10-09-contadores-de-descubrimiento";
 
 export function nowISO() {
   return new Date().toISOString();

@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "manifest": "preflight/jobs/ficha-ikea-365-or-180.json",
-  "binding": "d1a741eb61d2fb4c77731fcffd36c54aedacd59c204159d52868b9277e786e35",
+  "binding": "179f133e50279353cc4a18f8183fb87443a817dfe0745a659e42dc8c075a4342",
   "reviewer": "Miguel Ángel Martínez",
   "reviewed_at": "2026-10-09",
   "verdict": "APPROVE",
-  "rationale": "Las cláusulas y exclusiones publicadas son palabras literales de IKEA, recapturadas el 9-oct-2026 y conservadas en el repositorio. Una prueba automática verifica cada cita contra esas capturas. He leído la página renderizada.",
+  "rationale": "Las cláusulas y exclusiones publicadas son palabras literales de IKEA, recapturadas el 9-oct-2026 y conservadas en el repositorio. Una prueba automática verifica cada cita contra esas capturas. He leído la página renderizada. Nueva firma sobre el mismo contenido: el recibo quedó obsoleto porque su huella incluye todos los módulos de src/, y el parche de los contadores de descubrimiento no toca la ficha ni sus capturas.",
   "resolutions": [
     {
       "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
