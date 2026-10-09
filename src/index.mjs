@@ -804,6 +804,23 @@ async function handleStats(request, env, url) {
     },
     cache_hits: m.cache_hits || 0,
     cached_policies: cache.c || 0,
+    // W58 — los dos numeros que miden lo que pasa ANTES de un veredicto. Sin
+    // ellos, un periodo sin un solo pago no distingue "no me ha encontrado
+    // nadie" de "me han encontrado y no han convertido". Se escribian desde el
+    // parche anterior y no habia forma de leerlos: un contador que no se puede
+    // mirar no mide nada. Esta ruta ya exige clave de administrador, asi que no
+    // se publican a nadie mas.
+    //
+    // COMO LEERLOS, dicho aqui para que no se olvide: son trafico de superficie
+    // publica, no demanda. Un rastreador que pasa cada hora sube
+    // discovery_reads_total sin que nadie quiera comprar nada, y cualquiera
+    // puede inflar los dos desde fuera porque las rutas no piden clave. Valen
+    // para ver un cambio de tendencia y para descartar "no nos encuentra
+    // nadie", no como recuento de clientes potenciales.
+    discovery: {
+      reads_total: m.discovery_reads_total || 0,
+      challenges_402_total: m.x402_402_total || 0,
+    },
     calls_charged: cl.charged || 0,
     calls_free: cl.free || 0,
     free_trial_today: freeToday ? freeToday.v : 0,
