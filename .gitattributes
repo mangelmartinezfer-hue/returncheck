@@ -3,5 +3,8 @@
 
 # Evidence hashes must match on Windows and Linux.
 test/fixtures/ikea-policy-2026-10-02.txt text eol=lf
+test/fixtures/ikea-how-to-return-2026-10-09.txt text eol=lf
+test/fixtures/ikea-return-policy-2026-10-09.txt text eol=lf
+cards/*.mjs text eol=lf
 preflight/** text eol=lf
 tools/preflight/** text eol=lf
