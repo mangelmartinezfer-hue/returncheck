@@ -101,3 +101,34 @@ test("si las metricas fallan, la respuesta sale igual", async () => {
   const r = await worker.fetch(new Request("https://rc.example/.well-known/x402"), env);
   assert.equal(r.status, 200);
 });
+
+// Un contador que no se puede leer no mide nada. /stats devuelve una lista de
+// campos elegidos a mano, asi que si estos dos no se anaden explicitamente se
+// escriben en D1 y no hay forma de mirarlos, ni con la clave de administrador.
+test("/stats publica los dos contadores, y sigue exigiendo clave", async () => {
+  const env = entorno([], { ADMIN_KEY: "clave-de-prueba" });
+  env.DB = {
+    prepare(sql) {
+      return {
+        bind() { return this; },
+        async run() { return { success: true }; },
+        async first() { return { c: 0, charged: 0, free: 0, bal: 0, v: 0 }; },
+        async all() {
+          return /FROM metrics/i.test(sql)
+            ? { results: [{ name: "discovery_reads_total", value: 7 }, { name: "x402_402_total", value: 3 }] }
+            : { results: [] };
+        },
+      };
+    },
+  };
+
+  // Sin clave no existe.
+  const sinClave = await worker.fetch(new Request("https://rc.example/stats"), env);
+  assert.equal(sinClave.status, 404);
+
+  const r = await worker.fetch(new Request("https://rc.example/stats?k=clave-de-prueba"), env);
+  assert.equal(r.status, 200);
+  const j = await r.json();
+  assert.equal(j.discovery.reads_total, 7);
+  assert.equal(j.discovery.challenges_402_total, 3);
+});
