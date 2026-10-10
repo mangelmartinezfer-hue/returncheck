@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "manifest": "preflight/jobs/ficha-ebay-contexto.json",
+  "binding": "07f02817123930a140f620f1f2941dd674be68b392abc18a9a0a7713e6c05cb2",
+  "reviewer": "Codex - revision local por IA, no aprobacion de Miguel",
+  "reviewed_at": "2026-10-09",
+  "verdict": "APPROVE",
+  "rationale": "Revisado el diff de la ficha y su materializacion en HTML y JSON mediante 31 pruebas locales. Se omite la ventana estructurada incompleta, se mantiene la cita literal historica y se condiciona la cobertura. No se modifica el generador ni se cambian fechas de verificacion. El cambio reduce afirmaciones; no certifica vigencia, elegibilidad de compras ni despliegue. Revisada normalizacion LF del manifiesto para conservar la huella al aplicar el parche; contenido semantico identico.",
+  "resolutions": [
+    {
+      "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
+      "decision": "VERIFIED",
+      "reason": "Contrastadas las tres ramas, ejemplo, lede y metadatos: ninguna publica days/basis para eBay; la cita temporal se conserva y no se promete garantia universal. 2 regresiones fallan antes y pasan despues. Referencias: ayuda oficial eBay 4041 y politica 4210 consultadas en la revision; no se afirma nueva captura archivada."
+    },
+    {
+      "key": "INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION:files",
+      "decision": "ACCEPTED_LIMITATION",
+      "reason": "El perfil verifica integridad, no verdad comercial. Se acepta ese limite: revision semantica local por IA mas pruebas de renderizado HTML/JSON; publicacion y nueva captura quedan pendientes."
+    }
+  ]
+}
