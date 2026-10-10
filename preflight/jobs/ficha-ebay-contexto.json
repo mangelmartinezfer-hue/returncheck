@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "profile": "artifact",
+  "mode": "intake",
+  "purpose": "Correccion conservadora de la ficha publica eBay: no aplanar la regla de fecha estimada o real a days/basis, ni prometer cobertura universal. Se conservan clausulas y fechas historicas; no es nueva captura ni validacion de una compra. test/ebay-context.test.mjs comprueba HTML y JSON. Revision de vigencia y despliegue quedan fuera.",
+  "files": [
+    {
+      "path": "cards/rc-card-ebay-seller-decides.mjs",
+      "sha256": "add2b34f0f98008af8b8c522eb5a8826516ba02681280c007a56e5f70e6720df",
+      "bytes": 4956,
+      "format": "text"
+    }
+  ]
+}
