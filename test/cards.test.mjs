@@ -153,7 +153,7 @@ test("la ficha lleva la clausula literal, su fuente y su fecha, en las dos caras
   assert.equal(j.verified_on, "2026-08-20");
   assert.match(j.warning, /policies may change/i);
   const dias = j.outcomes.map((o) => o.days);
-  assert.deepEqual(dias, [undefined, 30, undefined]);
+  assert.deepEqual(dias, [undefined, undefined, undefined]);
 });
 
 test("Target queda despublicada en HTML y JSON hasta corregir sus excepciones", async () => {
@@ -182,9 +182,9 @@ test("SIN NUMERO INVENTADO: si la clausula no da plazo, no hay `days` ni `basis`
   // leerian como cero dias o como un fallo.
   assert.equal("days" in j.outcomes[0], false);
   assert.equal("basis" in j.outcomes[0], false);
-  // Se conserva la cifra de la segunda cita sin inventar un ancla unica.
-  assert.equal(j.outcomes[1].days, 30);
-  assert.equal(j.outcomes[1].basis, null);
+  // La cifra de la segunda cita se conserva en prosa; no se aplana su ancla.
+  assert.equal("days" in j.outcomes[1], false);
+  assert.equal("basis" in j.outcomes[1], false);
   assert.equal("days" in j.outcomes[2], false);
 });
 

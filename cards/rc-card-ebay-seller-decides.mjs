@@ -10,9 +10,10 @@
 // La garantia puede cubrir una transaccion aunque el vendedor no acepte
 // devoluciones, pero exige requisitos: no anula universalmente su politica.
 //
-// Dos citas no dan plazo y no exportan days/basis. La segunda conserva 30 dias
-// con basis null: estimated/actual no se reduce a un origen delivery unico.
-// Duracion citada no equivale a plazo universal ni permite calcular deadline.
+// Ninguna rama exporta days/basis. Dos citas no dan plazo; la segunda contiene
+// 30 dias, pero la regla completa admite el plazo mayor ofrecido por el vendedor.
+// Ni siquiera basis null convierte ese 30 en la ventana aplicable. Ademas,
+// estimated/actual no cabe en un origen delivery unico. Conservamos la cita.
 // Esta correccion no es una nueva captura: las fechas historicas se conservan.
 export default {
   card_id: "rc-card-ebay-seller-decides",
@@ -61,8 +62,7 @@ export default {
       tone: "limit",
     },
     {
-      days: 30,
-      basis: null,
+      days: null,
       when: "item arrived damaged, faulty, or not as described — if the transaction is eligible",
       when_long: "Money Back Guarantee timing requires the full rule",
       conditions: ["defective_or_not_as_described"],

@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "manifest": "preflight/jobs/ficha-ebay-contexto.json",
-  "binding": "efd8a1e88157036eb5249bb2f4d2b763e30178917756990270d64d9ee3a0cb62",
+  "binding": "dd3648962dd367c54e5a87a6d75d5a166ba22a1a79962a7b20030e1f1a4ee037",
   "reviewer": "Codex - revision local por IA, no aprobacion de Miguel",
-  "reviewed_at": "2026-10-09",
+  "reviewed_at": "2026-10-10",
   "verdict": "APPROVE",
-  "rationale": "Revision IA local de la version 3: se conserva days 30, basis es null tanto en la salida JSON como en su gemelo HTML. Las ramas sin numero siguen omitiendo ambos campos. Cita, fecha historica y limites se conservan. Las 31 pruebas de fichas pasan. No es aprobacion humana ni autorizacion de despliegue; no se cambia src/BUILD ni recibos de trabajos ajenos.",
+  "rationale": "Revision local por Codex tras ReturnCheck 214: la politica oficial eBay 4210 consultada el 10 oct admite el plazo mayor del vendedor para devoluciones por falta de conformidad. days 30 con basis null seguia representando una ventana incompleta. Se omiten ambos campos, se conserva la cita historica como fragmento y su fecha, y la prosa menciona elegibilidad, exclusiones y plazo mayor. 31 pruebas de fichas pasan. No es aprobacion humana ni autorizacion para fusionar/desplegar. src, BUILD y recibo IKEA intactos.",
   "resolutions": [
     {
       "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
       "decision": "VERIFIED",
-      "reason": "Revisados days 30 y basis null en la segunda rama, sin origen unico; retirada de afirmaciones universales en ejemplo, titulo y cobertura. Las pruebas nuevas detectan la perdida del numero en v2 y exigen conservarlo junto con los matices y la elegibilidad. No se calcula deadline ni se declara UCP conforme."
+      "reason": "Contrastado el apartado Actions & time frames for not as described returns de https://www.ebay.com/help/policies/ebay-money-back-guarantee-policy/ebay-money-back-guarantee-policy?id=4210: el plazo del vendedor puede ser mayor. Revisados JSON sin days/basis en las tres ramas, HTML sin cifra destacada de 30 y con cita literal, plazo mayor, elegibilidad y exclusiones. Se corrige tambien el comentario interno. Consulta web actual, no nueva captura historica archivada; no se cambia verified_on."
     },
     {
       "key": "INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION:files",
       "decision": "ACCEPTED_LIMITATION",
-      "reason": "El perfil verifica integridad, no verdad comercial. Se acepta ese limite: revision semantica local por IA mas pruebas de renderizado HTML/JSON; publicacion y nueva captura quedan pendientes."
+      "reason": "El perfil verifica integridad, no verdad comercial. Revision semantica local por IA y pruebas HTML/JSON; no se certifican elegibilidad de una compra ni UCP. La cita historica sigue siendo un fragmento; fusion y despliegue fuera de este encargo."
     }
   ]
 }
