@@ -4,7 +4,7 @@ import { validateRequest, checkInvariants } from "../src/contract.mjs";
 import { applyDeadline, windowBasisFromClause, windowDaysFromClause, missingInputFor, missingInputHint } from "../src/decision.mjs";
 import { chargeAtomic, markFree } from "../src/billing.mjs";
 import { addDays, normalizeUrl, newApiKey } from "../src/util.mjs";
-import { cacheKey, clauseInText, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
+import { cacheKey, clauseInText, verbatimClause, clauseSupportsVerdict, focusPolicyText, MAX_POLICY_CHARS,
          policyKeywordHits, policyLinkCandidates, guessedPolicyUrls,
          clauseIsJurisdictionConditional, policyDefersToSeller,
          clausePositiveButUnverifiedForOpenedItem,
@@ -104,13 +104,28 @@ test("clauseInText acepta cita presente y rechaza cita ausente", () => {
   // Cita que el modelo se ha inventado (no está en la página): se rechaza.
   assert.equal(clauseInText("returned within 90 days for store credit", page), false);
 });
-test("clauseInText acepta paráfrasis de borde si hay un tramo largo literal (caso Apple)", () => {
+// W52 — ESTE TEST CAMBIA DE SIGNO A PROPÓSITO. Antes fijaba que una paráfrasis de
+// borde pasaba la verificación, y eso era justo el defecto: "Per policy," y "of
+// receipt." no los escribió Apple, y se publicaban como cita literal suya.
+//
+// El contrato nuevo parte el problema en dos: `clauseInText` dice si la cita del
+// modelo vale tal cual (ahora: no), y `verbatimClause` recupera la frase REAL de
+// la página. No se pierde el caso; se publica la frase del comercio.
+test("W52 caso Apple: la paráfrasis NO pasa, pero se recupera la frase literal", () => {
   const page = "You can return or exchange it with a receipt within 14 days of the date you receive the product from Apple.";
-  // El modelo cambia el borde pero conserva un tramo largo literal de la página.
   const paraphrased = "Per policy, you can return or exchange it with a receipt within 14 days of receipt.";
-  assert.equal(clauseInText(paraphrased, page), true);
-  // Una cita totalmente distinta (sin tramo literal largo) -> rechazada.
+
+  // 1) La cita del modelo ya no se da por buena: añade palabras que no están.
+  assert.equal(clauseInText(paraphrased, page), false);
+
+  // 2) Pero la página sí tiene la frase, y es la que se publica.
+  const literal = verbatimClause(paraphrased, page);
+  assert.equal(literal, page);
+  assert.equal(clauseInText(literal, page), true, "lo recuperado debe ser literal");
+
+  // 3) Una cita totalmente distinta no ancla a nada.
   assert.equal(clauseInText("Returns accepted within ninety days for any reason whatsoever", page), false);
+  assert.equal(verbatimClause("Returns accepted within ninety days for any reason whatsoever", page), null);
 });
 test("clauseInText rechaza citas demasiado cortas o vacías", () => {
   assert.equal(clauseInText("30 days", "returned within 30 days"), false); // < 12 chars

@@ -110,25 +110,76 @@ export function focusPolicyText(text) {
 // ¿La cita está anclada LITERALMENTE en la página? Ideal: la frase entera aparece.
 // Si el modelo la parafrasea en los bordes, aceptamos si al menos un TRAMO seguido
 // de `minRun` caracteres es literal en la página (sigue probando cita real, sin inventar).
-export function clauseInText(clause, text, minRun = 40) {
+// W52 — VERIFICACIÓN ESTRICTA. Antes bastaba con que 40 caracteres seguidos de la
+// cita estuvieran en la página: una cita de 300 caracteres podía llevar 260
+// inventados y pasar, y se publicaba como `exact_clause`, es decir, como palabras
+// del comercio. Eso contradice el principio rector. Ahora la cita tiene que estar
+// ÍNTEGRA en la página.
+//
+// Lo único que se normaliza son diferencias que no cambian el significado ni
+// añaden palabras: mayúsculas, comillas tipográficas, guiones y espacios. Nada más.
+//
+// El anclaje por tramo literal NO desaparece, cambia de sitio y de papel: ya no
+// sirve para dar por buena la cita del modelo, sino para localizar en la página la
+// frase que el modelo señalaba (ver `verbatimClause`). Lo que se publica sale
+// siempre de la página.
+export function clauseInText(clause, text) {
   if (!clause || !text) return false;
-  const norm = (s) => s.toLowerCase().replace(/["“”'’]/g, "").replace(/\s+/g, " ").trim();
-  const c = norm(clause);
-  const t = norm(text);
+  const c = normText(clause);
   if (c.length < 12) return false;          // demasiado corta para verificar
-  if (t.includes(c)) return true;            // caso ideal: frase entera literal
-  if (c.length <= minRun) return false;      // corta y no está entera -> no vale
-  for (let i = 0; i + minRun <= c.length; i += 10) {
-    if (t.includes(c.slice(i, i + minRun))) return true; // hay una tirada literal larga
+  return normText(text).includes(c);
+}
+
+// Longitud del tramo literal que basta para decidir A QUÉ frase de la página se
+// refería el modelo. No decide si la cita vale: solo dónde mirar.
+const ANCHOR_RUN = 40;
+
+// W52 — Devuelve la frase LITERAL DE LA PÁGINA a la que se ancla la cita del
+// modelo, o null si no hay ninguna.
+//
+// Por qué existe, y por qué no basta con rechazar: en el caso que destapó el
+// defecto (Apple) la página SÍ contenía una frase válida; el modelo la citó
+// cambiándole los bordes. Rechazar sin más perdía una respuesta que estaba
+// demostrada. Lo correcto no es creerle al modelo ni tirar el caso: es publicar la
+// frase de la página. El modelo dice dónde mirar; la página dice qué se publica.
+//
+// Se devuelve el texto ORIGINAL de la frase (mayúsculas incluidas), solo con los
+// espacios colapsados — el mismo criterio que ya usa `conditionExclusionClause`.
+export function verbatimClause(clause, policyText) {
+  const c = normText(clause);
+  if (c.length < 12 || !policyText) return null;
+
+  const frases = splitSentences(policyText)
+    .map((s) => s.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+
+  // 1) Caso ideal: una frase de la página contiene la cita entera.
+  for (const s of frases) if (normText(s).includes(c)) return s;
+
+  // 2) Anclaje: el modelo parafraseó los bordes pero conserva un tramo literal
+  //    largo. Se publica la frase de la página, no la del modelo.
+  if (c.length <= ANCHOR_RUN) return null;
+  for (const s of frases) {
+    const n = normText(s);
+    for (let i = 0; i + ANCHOR_RUN <= c.length; i += 10) {
+      if (n.includes(c.slice(i, i + ANCHOR_RUN))) return s;
+    }
   }
-  return false;
+  return null;
 }
 
 // Normalización compartida (misma que clauseInText): minúsculas, sin comillas
 // tipográficas, espacios colapsados. Trabajar siempre en este espacio evita
 // desalineaciones de offsets entre la cita del modelo y el texto de la página.
 function normText(s) {
-  return (s || "").toLowerCase().replace(/["“”'’]/g, "").replace(/\s+/g, " ").trim();
+  return (s || "")
+    .toLowerCase()
+    .replace(/["“”'’]/g, "")
+    .replace(/­/g, "")          // guion blando (corte de línea): no es texto
+    .replace(/[‐-―−]/g, "-")  // guiones y menos tipográficos -> "-"
+    .replace(/…/g, "...")       // puntos suspensivos tipográficos
+    .replace(/\s+/g, " ")            // \s ya cubre el espacio duro ( )
+    .trim();
 }
 
 // Parte un texto en frases (aproximación suficiente para prosa de políticas).
