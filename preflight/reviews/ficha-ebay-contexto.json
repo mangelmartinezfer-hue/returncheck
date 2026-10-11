@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "manifest": "preflight/jobs/ficha-ebay-contexto.json",
-  "binding": "07f02817123930a140f620f1f2941dd674be68b392abc18a9a0a7713e6c05cb2",
-  "reviewer": "Codex - revision local por IA, no aprobacion de Miguel",
-  "reviewed_at": "2026-10-09",
+  "binding": "5ae338f46b9117cb0b5cbaab19c39da2d4791c92185277debf6a09940072c5e5",
+  "reviewer": "Claude (Opus 5) - revision local por IA, NO aprobacion de Miguel",
+  "reviewed_at": "2026-10-11",
   "verdict": "APPROVE",
-  "rationale": "Revisado el diff de la ficha y su materializacion en HTML y JSON mediante 31 pruebas locales. Se omite la ventana estructurada incompleta, se mantiene la cita literal historica y se condiciona la cobertura. No se modifica el generador ni se cambian fechas de verificacion. El cambio reduce afirmaciones; no certifica vigencia, elegibilidad de compras ni despliegue. Revisada normalizacion LF del manifiesto para conservar la huella al aplicar el parche; contenido semantico identico.",
+  "rationale": "Coteje las tres clausulas publicadas contra las dos paginas oficiales de eBay con navegador real el 11-oct-2026, y archive las capturas en el repositorio. Dos coincidian palabra por palabra (pagina 4210). La primera no: publicaba \"see the seller's full return policy\" y la pagina 4041 dice \"Check the listing in your Purchases ... for the seller's full return policy\". Miguel autorizo corregirla al fragmento literal verificado, \"for the seller's full return policy\"; es lo unico que se ha cambiado del texto. Las tres fechas pasan a 2026-10-11 porque hay captura propia de las tres. No se ha revisado ninguna otra afirmacion de la ficha, ni su vigencia futura, ni el despliegue. Esta es una revision por IA: la aprobacion humana de Miguel sobre esta ficha sigue pendiente si la quiere.",
   "resolutions": [
     {
       "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
       "decision": "VERIFIED",
-      "reason": "Contrastadas las tres ramas, ejemplo, lede y metadatos: ninguna publica days/basis para eBay; la cita temporal se conserva y no se promete garantia universal. 2 regresiones fallan antes y pasan despues. Referencias: ayuda oficial eBay 4041 y politica 4210 consultadas en la revision; no se afirma nueva captura archivada."
+      "reason": "Las tres clausulas aparecen literalmente en la captura de su propia fuente, y test/ebay-context.test.mjs lo comprueba en cada ejecucion cotejando cada outcome contra el fichero de su source_url. Ninguna rama exporta days/basis. La parafrasis anterior queda bloqueada por una asercion explicita."
     },
     {
       "key": "INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION:files",
       "decision": "ACCEPTED_LIMITATION",
-      "reason": "El perfil verifica integridad, no verdad comercial. Se acepta ese limite: revision semantica local por IA mas pruebas de renderizado HTML/JSON; publicacion y nueva captura quedan pendientes."
+      "reason": "El perfil artifact solo comprueba integridad de ficheros, no verdad comercial, y no hay perfil de dominio para fichas de evidencia. Se acepta ese limite: la comprobacion de significado la aportan las capturas archivadas con su fecha y las pruebas que cotejan cada cita contra ellas. No cubre la vigencia futura de las paginas de eBay."
     }
   ]
 }

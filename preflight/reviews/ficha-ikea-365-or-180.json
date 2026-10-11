@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "manifest": "preflight/jobs/ficha-ikea-365-or-180.json",
-  "binding": "2121915be9be0f3f0b3e05d5a67407380045fb7f0e2b86aa02e439e486b58abd",
+  "binding": "16840db18ad735296cfa1dedb5deaad9cd4f16dbf090c168a0425aae29885f5b",
   "reviewer": "Miguel Ángel Martínez",
-  "reviewed_at": "2026-10-09",
+  "reviewed_at": "2026-10-11",
   "verdict": "APPROVE",
-  "rationale": "Las cláusulas y exclusiones publicadas son palabras literales de IKEA, recapturadas el 9-oct-2026 y conservadas en el repositorio. Una prueba automática verifica cada cita contra esas capturas. He leído la página renderizada. Firma renovada sobre el mismo contenido: el recibo caduca con cualquier cambio en src/, y el parche que expone los contadores en /stats no toca la ficha ni sus capturas.",
+  "rationale": "Renovación de mi aprobación del 9-oct-2026 sobre contenido ya revisado entonces. La ficha y sus dos capturas no han cambiado desde aquella revisión: siguen en el commit del 9-oct y sus hashes casan con el manifiesto. El recibo caducó únicamente porque su huella incluye todos los módulos de src/ y el parche de verificación literal de citas los tocó. No he realizado una nueva consulta a la web ni una nueva captura: esta firma renueva la revisión anterior sobre el mismo material.",
   "resolutions": [
     {
       "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
       "decision": "VERIFIED",
-      "reason": "Cada cita está comprobada contra la captura por test/ficha-ikea.test.mjs. basis va a null porque ninguna de las dos páginas de IKEA declara el inicio del plazo."
+      "reason": "Cada cláusula y cada exclusión publicadas están comprobadas literalmente contra las dos capturas del 9-oct-2026 por test/ficha-ikea.test.mjs, que sigue en verde. basis va a null en los tres casos porque ninguna de las dos páginas declara desde qué evento corre el plazo. Contenido idéntico al que revisé el 9-oct."
     },
     {
       "key": "INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION:files",
       "decision": "ACCEPTED_LIMITATION",
-      "reason": "El perfil artifact solo comprueba integridad. No existe todavía un perfil de dominio para fichas de evidencia. La comprobación de significado la aportan las pruebas de la ficha y esta revisión."
+      "reason": "El perfil artifact solo comprueba integridad de ficheros, no verdad comercial, y no existe todavía un perfil de dominio para fichas de evidencia. Acepto ese límite: la comprobación de significado la aportan las pruebas de la ficha y mi revisión del 9-oct, que esta firma renueva. No cubre vigencia actual de la política de IKEA."
     }
   ]
 }

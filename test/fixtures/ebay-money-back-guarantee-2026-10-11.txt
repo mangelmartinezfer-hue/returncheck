@@ -1,0 +1,16 @@
+CAPTURA (EXTRACTO): https://www.ebay.com/help/policies/ebay-money-back-guarantee-policy/ebay-money-back-guarantee-policy?id=4210
+TITULO: eBay Money Back Guarantee policy
+FECHA DE CAPTURA: 2026-10-11
+METODO: navegador real (panel integrado), textContent de <main>, espacios colapsados.
+
+ALCANCE: extracto, no la pagina entera. Se archivan los dos pasajes que contienen
+las citas publicadas en la ficha, con su contexto inmediato. El resto de la
+politica NO esta aqui y NO queda verificado por este fichero.
+
+--- PASAJE 1: plazos de "not as described" (sostiene la cita de 30 dias) ---
+
+Both buyers and sellers must meet all applicable return requirements. If an item is being returned, the seller is responsible for return shipping. Actions & time frames for "not as described" returns Action Time frame The buyer requests a return Start a return request Latest: 30 calendar days after the estimated or actual delivery date or within the seller's stated returns window, whichever is longer Certain items have a more limited return window. See Exclusions and special coverage.
+
+--- PASAJE 2: articulo que no coincide con el anuncio (sostiene la cita de la garantia) ---
+
+Sellers are required to deliver the item as it was described in the listing. If the buyer receives the wrong item, or the item arrives broken, damaged, or faulty (and was not clearly described as such), they are entitled to return it for a refund, even if the seller doesn't offer returns. Buyers and sellers may agree to another solution, such as a full or partial refund while the buyer keeps the item, or a replacement item instead of a refund.

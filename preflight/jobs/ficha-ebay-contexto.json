@@ -2,12 +2,24 @@
   "schema_version": 1,
   "profile": "artifact",
   "mode": "intake",
-  "purpose": "Correccion conservadora de la ficha publica eBay: no aplanar la regla de fecha estimada o real a days/basis, ni prometer cobertura universal. Se conservan clausulas y fechas historicas; no es nueva captura ni validacion de una compra. test/ebay-context.test.mjs comprueba HTML y JSON. Revision de vigencia y despliegue quedan fuera.",
+  "purpose": "Ficha publica de eBay con sus tres clausulas recapturadas el 11-oct-2026 y las dos capturas que las respaldan. Dato, no codigo. La verificacion contra las paginas oficiales encontro que la primera clausula publicaba \"see the seller's full return policy\" mientras que la pagina 4041 dice \"Check the listing in your Purchases ... for the seller's full return policy\": se corrige al fragmento literal verificado. Las otras dos coinciden palabra por palabra con la pagina 4210. Las tres fechas pasan a 2026-10-11 porque hoy hay captura propia de las tres. test/ebay-context.test.mjs exige que cada clausula publicada aparezca literalmente en la captura de su fuente. Ninguna rama exporta days/basis. Revision de vigencia y despliegue quedan fuera.",
   "files": [
     {
       "path": "cards/rc-card-ebay-seller-decides.mjs",
-      "sha256": "add2b34f0f98008af8b8c522eb5a8826516ba02681280c007a56e5f70e6720df",
-      "bytes": 4956,
+      "sha256": "f226d7a33858fbb962c3bfc38f8fa7f50680f6f637f810e002fc31ecff37a78c",
+      "bytes": 5673,
+      "format": "text"
+    },
+    {
+      "path": "test/fixtures/ebay-returning-item-2026-10-11.txt",
+      "sha256": "f13ae1a1866fc5c1ea45a17ec8d26b2f9584fbee8e83a29b8c862e94d8bad122",
+      "bytes": 7028,
+      "format": "text"
+    },
+    {
+      "path": "test/fixtures/ebay-money-back-guarantee-2026-10-11.txt",
+      "sha256": "31dbd944c521f2bc5d3f115067b6ffd825f34d81e07cd9603e0f4c3efde9bbc2",
+      "bytes": 1617,
       "format": "text"
     }
   ]

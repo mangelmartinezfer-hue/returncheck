@@ -1,0 +1,130 @@
+CAPTURA: https://www.ebay.com/help/buying/returns-refunds/returning-item?id=4041
+TITULO: Return an item for a refund | eBay
+FECHA DE CAPTURA: 2026-10-11
+METODO: navegador real (panel integrado), textContent de <main>, espacios colapsados.
+NOTA: la frase relevante vive dentro del acordeon plegado "When can I return an item?",
+      por lo que no aparece en el texto visible sin desplegarlo. Se captura del DOM.
+
+---
+
+Home Customer Service Returns and refunds Returning items Return an item for a refund
+
+4 min article
+
+Return an item for a refund
+
+On this page
+How your return gets resolved
+Open a return request
+Send the item back
+Get your refund
+Ask eBay to step in and help
+Close a return request
+
+If you've changed your mind about an item you bought, or there's something wrong with it, you can request a return - and you're protected the whole way through.
+
+You're covered by the eBay Money Back Guarantee
+If the seller doesn't respond within 3 business days, or can't resolve the issue, you can ask eBay to step in and help. See Ask eBay to step in below.
+
+How your return gets resolved
+
+ Open a return request — Tell us what happened and why you want to return the item.
+ Seller has 3 business days — The seller can accept the return, issue a full refund, offer a partial refund, or respond with a message.
+ Send the item back — If accepted, send the item back using the seller-provided or your own label.
+ Get your refund — Usually within 3-5 business days of the seller receiving the item back.
+
+If the seller doesn't respond or doesn't resolve it, you can ask eBay to step in at any point after 3 business days. See how below.
+
+Open a return request
+
+When you request a return, the seller should get back to you within 3 business days. If the seller doesn't respond, or you're unable to resolve the issue with them, you can ask us to step in and help.
+
+To request a return, select the item from your recent purchases, or use the button below. You can also start a return request from your Purchases in My eBay.
+
+Open a return request - opens in new window or tab
+
+When can I return an item?
+
+Many sellers accept returns if you've changed your mind. Check the listing in your Purchases - opens in new window or tab for the seller's full return policy. If the item doesn't match the listing, or arrived faulty or damaged, you may be eligible for eBay Money Back Guarantee even if the seller's policy says they don't accept returns.
+
+How do I request a return through My eBay?
+
+Find the item in your Purchases - opens in new window or tab, select Return this item, choose a reason and add a comment.
+
+If the item arrived damaged, broken, or faulty, you must add at least one image (up to 10) following our Images, video and text policy, the select Confirm return.
+
+What if I'm returning more than one item?
+
+Sets and bundled items – Return the whole lot. Multiples of the same item – return some or all, but only one request for the order. Combined purchases from the same seller – open a separate request for each listing.
+
+How the seller may respond to your request
+
+The seller has 3 business days to accept and offer a full refund, offer a partial refund, offer a replacement or exchange, decline (if you changed your mind and their policy says no returns, or you missed the deadline), or ask you for more details.
+
+Send the item back
+
+Once your return is accepted, we'll email you asking you to send the item back. Ship it by the date in that email to avoid delays. If you're buying the label yourself, use a tracked service. Items worth $750 or more need signature confirmation. See return shipping for buyers for who pays.
+
+Important
+Repack the item carefully. If it's returned used, damaged, missing parts, or damaged in shipping because it wasn't packaged correctly, the seller may deduct from your refund — see Condition of returned items policy.
+
+Trouble with your return label?
+
+If your return label won't print, won't load, or the QR code won't scan, don't worry — you don't need to start over. Ask eBay to step in (see below) and we'll help you get a working label so you can complete your return.
+
+Get your refund
+
+Most sellers refund as soon as they get the item back. Refunds typically arrive within 3-5 business days of the seller receiving your return, back to your original or selected payment method. You can check the status of your request at any time to find your refund deadline.
+
+Why was my refund less than what I paid?
+
+If the item was returned used, damaged, missing parts, or damaged in shipping, the seller might deduct from your refund — see the Condition of returned items policy. If you paid for a label we provided, its cost is deducted too.
+
+Ask eBay to step in and help
+
+Most of the time, the seller can resolve your issue but you can ask eBay to step in if:
+
+ the seller hasn't responded within 3 business days,
+ the seller responded but didn't provide a resolution (for example, accepted the return but didn't send a label), or
+ you returned the item and it's been delivered back to the seller, but they haven't refunded you by the deadline
+
+Don't wait too long — we'll automatically close a request with no activity.
+
+ Find the item in your Purchases - opens in new window or tab.
+ Select See return details.
+ Select Ask eBay to step in and help.
+ Choose a reason, then select Confirm.
+
+We'll review the case details and aim to resolve it fairly, usually within 48 hours. If you disagree with our resolution, you can appeal with new information within 30 calendar days of the case closing.
+
+Close a return request
+
+Changed your mind about returning? Go to Purchases - opens in new window or tab, find the item, select More actions, then See request details, then Close your request, choose a reason, and select Confirm.
+
+Remember
+You can't reopen a return request after closing it, or submit a new one for the same transaction. If you think you picked the wrong reason, keep the request open and message your seller instead.
+
+Misue of returns
+
+Buyers may not misuse our returns process — for example, requesting a return and sending back a different item. See the Abusive buyer policy for more examples. Full details on eligibility and coverage are in the eBay Money Back Guarantee policy.
+
+Frequently asked questions
+
+How long does the seller have to respond?
+
+3 business days from when you open the return request.
+
+What if my return label doesn't work?
+
+Ask eBay to step in — we'll help you get a working label. See Trouble with your return label? above.
+
+When will I get my money back?
+
+Usually within 3-5 business days after the seller receives your returned item, minus any deductions for condition or label cost.
+
+What if I disagree with eBay's decision after stepping in?
+
+You can appeal with new information within 30 calendar days of the case being closed.
+
+Top Takeaway
+If the item you received doesn't match the listing, or if it arrived faulty or damaged, you can return it even if the seller's returns policy says they don't accept returns.

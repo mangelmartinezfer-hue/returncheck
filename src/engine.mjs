@@ -6,7 +6,7 @@ import { SYSTEM_PROMPT, RESPONSE_SCHEMA, AI_MODEL, inferenceParams } from "./pro
 import { checkInvariants } from "./contract.mjs";
 import { applyDeadline, missingInputFor, missingInputHint, classifyPositive } from "./decision.mjs";
 import { todayDate, addDays, sha256hex, BUILD } from "./util.mjs";
-import { cacheKey, htmlToText, focusPolicyText, clauseInText, clauseSupportsVerdict,
+import { cacheKey, htmlToText, focusPolicyText, clauseInText, verbatimClause, clauseSupportsVerdict,
   candidateClauses, candidateBlock, pickClause, usableAnswerHuman,
          policyKeywordHits, policyLinkCandidates,
           clauseIsJurisdictionConditional, policyDefersToSeller,
@@ -276,6 +276,23 @@ async function assemble(ai, req, policyText, meta, sourceUrl) {
       ai.policy.item_conditions_accepted = ["NewCondition"];
     }
     if (req.reason) ai.policy.exceptions = (ai.policy.exceptions || []).filter(tag => tag !== req.reason);
+  }
+
+  // W52 — ANCLAJE A LA FUENTE, antes de nada. Si la cita del modelo no está
+  // ÍNTEGRA en la página, no se publica tal cual: se sustituye por la frase
+  // literal de la página a la que se ancla. Si no hay ninguna, no se sustituye y
+  // el guarda de abajo (clauseInText, ahora estricto) la degrada a UNKNOWN.
+  //
+  // Va DELANTE de reconcileDays a propósito: el número de días debe reconciliarse
+  // contra la cita que se va a publicar, no contra la que tecleó el modelo.
+  if (determinate && ai.evidence && ai.evidence.exact_clause &&
+      !clauseInText(ai.evidence.exact_clause, policyText)) {
+    const literal = verbatimClause(ai.evidence.exact_clause, policyText);
+    if (literal) {
+      meta.clause_anchored_to_source = true;
+      meta.clause_model_rejected = ai.evidence.exact_clause.slice(0, 300);
+      ai.evidence.exact_clause = literal;
+    }
   }
 
   // Hallazgo A (doc 65) — la cita manda sobre el número que dio el modelo. Si la

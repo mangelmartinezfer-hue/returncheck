@@ -3,8 +3,19 @@
 // ESTE FICHERO ES DATO, NO CODIGO. Se edita a mano y se lee en el diff antes de
 // publicar. La forma de la pagina y del gemelo JSON vive en src/cards.mjs.
 //
-// PROCEDENCIA: tablero maestro, bloque de reglas normalizadas. Las tres clausulas
-// verificadas el 20 ago 2026. Van LITERALES.
+// PROCEDENCIA: tablero maestro, bloque de reglas normalizadas. Van LITERALES.
+//
+// RECAPTURA 11 OCT 2026. Las tres clausulas se cotejaron contra las paginas
+// oficiales con navegador real y sus capturas quedan archivadas en
+// test/fixtures/ebay-returning-item-2026-10-11.txt y
+// test/fixtures/ebay-money-back-guarantee-2026-10-11.txt (extracto).
+//
+// UNA NO COINCIDIA. La primera clausula publicaba «see the seller's full return
+// policy». La pagina 4041 dice «Check the listing in your Purchases ... for the
+// seller's full return policy»: el verbo «see» no esta en la fuente. Se corrige
+// al fragmento literal verificado, «for the seller's full return policy», y las
+// tres fechas pasan a 2026-10-11 porque hoy hay captura propia de las tres.
+// Lo encontro el guarda estricto de citas: era exactamente el patron que rechaza.
 //
 // Cambio de opinion y falta de conformidad requieren revisar reglas distintas.
 // La garantia puede cubrir una transaccion aunque el vendedor no acepte
@@ -23,7 +34,7 @@ export default {
   // Publicada el 31 ago 2026 con los literales del tablero ya pegados.
   published: true,
 
-  verified_on: "2026-08-20",
+  verified_on: "2026-10-11",
   source_url:
     "https://www.ebay.com/help/policies/ebay-money-back-guarantee-policy/ebay-money-back-guarantee-policy?id=4210",
 
@@ -54,10 +65,10 @@ export default {
       conditions: ["seller_accepts_returns"],
       conditions_text:
         "eBay does not set this window. The return period, and who pays return shipping, are chosen by the seller and shown on the listing.",
-      clause: "see the seller's full return policy",
+      clause: "for the seller's full return policy",
       source_url: "https://www.ebay.com/help/buying/returns-refunds/returning-item?id=4041",
       source_label: "Returning an item",
-      verified_on: "2026-08-20",
+      verified_on: "2026-10-11",
       tone: "limit",
     },
     {
@@ -71,7 +82,7 @@ export default {
       source_url:
         "https://www.ebay.com/help/policies/ebay-money-back-guarantee-policy/ebay-money-back-guarantee-policy?id=4210",
       source_label: "eBay Money Back Guarantee",
-      verified_on: "2026-08-20",
+      verified_on: "2026-10-11",
       tone: "allow",
     },
     {
@@ -86,7 +97,7 @@ export default {
       source_url:
         "https://www.ebay.com/help/policies/ebay-money-back-guarantee-policy/ebay-money-back-guarantee-policy?id=4210",
       source_label: "eBay Money Back Guarantee",
-      verified_on: "2026-08-20",
+      verified_on: "2026-10-11",
       tone: "allow",
     },
   ],
