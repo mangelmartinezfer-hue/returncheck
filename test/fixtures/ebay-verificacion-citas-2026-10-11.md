@@ -58,9 +58,17 @@ La cita publicada es una subcadena exacta.
 
 ---
 
-## Resultado
+## Resultado y corrección aplicada
 
-2 de 3 coinciden. La cita 1 no es literal: es una paráfrasis con el verbo cambiado.
+2 de 3 coincidían. La cita 1 era una paráfrasis con el verbo cambiado.
 
-El recibo de eBay **no se ha preparado** para firma. Queda en `UNRESOLVED`, a la espera de
-decisión sobre la cita 1.
+Con autorización de Miguel (11-oct-2026) la cita 1 pasa a ser el fragmento literal verificado:
+
+    antes:  see the seller's full return policy
+    ahora:  for the seller's full return policy
+
+Las citas 2 y 3 se conservan sin tocar. Las tres `verified_on` pasan a 2026-10-11, porque
+hoy hay captura propia archivada de las tres fuentes.
+
+`test/ebay-context.test.mjs` coteja ahora cada cláusula publicada contra la captura de su
+propia fuente, y bloquea el regreso de la paráfrasis.

@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "manifest": "preflight/jobs/ficha-ebay-contexto.json",
-  "binding": "628ab8d6912ae0406793f500e8e7aaf9589c9b842c9d6531646b9609574b69cf",
-  "reviewer": "",
-  "reviewed_at": "",
-  "verdict": "UNRESOLVED",
-  "rationale": "",
+  "binding": "5ae338f46b9117cb0b5cbaab19c39da2d4791c92185277debf6a09940072c5e5",
+  "reviewer": "Claude (Opus 5) - revision local por IA, NO aprobacion de Miguel",
+  "reviewed_at": "2026-10-11",
+  "verdict": "APPROVE",
+  "rationale": "Coteje las tres clausulas publicadas contra las dos paginas oficiales de eBay con navegador real el 11-oct-2026, y archive las capturas en el repositorio. Dos coincidian palabra por palabra (pagina 4210). La primera no: publicaba \"see the seller's full return policy\" y la pagina 4041 dice \"Check the listing in your Purchases ... for the seller's full return policy\". Miguel autorizo corregirla al fragmento literal verificado, \"for the seller's full return policy\"; es lo unico que se ha cambiado del texto. Las tres fechas pasan a 2026-10-11 porque hay captura propia de las tres. No se ha revisado ninguna otra afirmacion de la ficha, ni su vigencia futura, ni el despliegue. Esta es una revision por IA: la aprobacion humana de Miguel sobre esta ficha sigue pendiente si la quiere.",
   "resolutions": [
     {
       "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
-      "decision": "UNRESOLVED",
-      "reason": ""
+      "decision": "VERIFIED",
+      "reason": "Las tres clausulas aparecen literalmente en la captura de su propia fuente, y test/ebay-context.test.mjs lo comprueba en cada ejecucion cotejando cada outcome contra el fichero de su source_url. Ninguna rama exporta days/basis. La parafrasis anterior queda bloqueada por una asercion explicita."
     },
     {
       "key": "INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION:files",
-      "decision": "UNRESOLVED",
-      "reason": ""
+      "decision": "ACCEPTED_LIMITATION",
+      "reason": "El perfil artifact solo comprueba integridad de ficheros, no verdad comercial, y no hay perfil de dominio para fichas de evidencia. Se acepta ese limite: la comprobacion de significado la aportan las capturas archivadas con su fecha y las pruebas que cotejan cada cita contra ellas. No cubre la vigencia futura de las paginas de eBay."
     }
   ]
 }

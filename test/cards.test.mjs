@@ -148,9 +148,9 @@ test("la ficha lleva la clausula literal, su fuente y su fecha, en las dos caras
 
   assert.match(html, /30 calendar days after the estimated or actual delivery date/);
   assert.match(html, /ebay\.com\/help\/policies\/ebay-money-back-guarantee-policy/);
-  assert.match(html, /2026-08-20/);
+  assert.match(html, /2026-10-11/);
 
-  assert.equal(j.verified_on, "2026-08-20");
+  assert.equal(j.verified_on, "2026-10-11");
   assert.match(j.warning, /policies may change/i);
   const dias = j.outcomes.map((o) => o.days);
   assert.deepEqual(dias, [undefined, undefined, undefined]);
@@ -306,7 +306,7 @@ test("sitemap: solo las URLs publicadas, absolutas y con su fecha", async () => 
   assert.match(x, new RegExp("<loc>" + BASE + "/</loc>"));
   assert.match(x, new RegExp("<loc>" + BASE + "/cards</loc>"));
   assert.match(x, new RegExp("<loc>" + BASE + "/cards/" + PUBLICADA + "</loc>"));
-  assert.match(x, /<lastmod>2026-08-20<\/lastmod>/);
+  assert.match(x, /<lastmod>2026-10-11<\/lastmod>/);
   assert.doesNotMatch(x, new RegExp(TARGET));
   assert.doesNotMatch(x, new RegExp(SIN_PUBLICAR));
 });
