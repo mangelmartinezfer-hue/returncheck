@@ -1,21 +1,21 @@
 {
   "schema_version": 1,
   "manifest": "preflight/jobs/ficha-ikea-365-or-180.json",
-  "binding": "2121915be9be0f3f0b3e05d5a67407380045fb7f0e2b86aa02e439e486b58abd",
-  "reviewer": "Miguel Ángel Martínez",
-  "reviewed_at": "2026-10-09",
-  "verdict": "APPROVE",
-  "rationale": "Las cláusulas y exclusiones publicadas son palabras literales de IKEA, recapturadas el 9-oct-2026 y conservadas en el repositorio. Una prueba automática verifica cada cita contra esas capturas. He leído la página renderizada. Firma renovada sobre el mismo contenido: el recibo caduca con cualquier cambio en src/, y el parche que expone los contadores en /stats no toca la ficha ni sus capturas.",
+  "binding": "16840db18ad735296cfa1dedb5deaad9cd4f16dbf090c168a0425aae29885f5b",
+  "reviewer": "",
+  "reviewed_at": "",
+  "verdict": "UNRESOLVED",
+  "rationale": "",
   "resolutions": [
     {
       "key": "CONTENT_AND_NEW_DOMAIN_RULES_REQUIRE_REVIEW:files",
-      "decision": "VERIFIED",
-      "reason": "Cada cita está comprobada contra la captura por test/ficha-ikea.test.mjs. basis va a null porque ninguna de las dos páginas de IKEA declara el inicio del plazo."
+      "decision": "UNRESOLVED",
+      "reason": ""
     },
     {
       "key": "INTEGRITY_ONLY_NOT_DOMAIN_VALIDATION:files",
-      "decision": "ACCEPTED_LIMITATION",
-      "reason": "El perfil artifact solo comprueba integridad. No existe todavía un perfil de dominio para fichas de evidencia. La comprobación de significado la aportan las pruebas de la ficha y esta revisión."
+      "decision": "UNRESOLVED",
+      "reason": ""
     }
   ]
 }
