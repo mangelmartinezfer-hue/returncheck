@@ -17,6 +17,12 @@ trial is available).
 
 ---
 
+## Reproducible developer demonstration
+
+[**Four-verdict evidence demo: synthetic test cases and recorded IKEA US checks**](docs/returncheck-verified-demo.md)
+
+Includes recorded YES, YES_WITH_CONDITIONS, NO and UNKNOWN responses, original test-source links, an IKEA real-merchant field case, and a runnable example. The four-verdict test material is **synthetic**; only the IKEA case uses real merchant policy text supplied by the caller. This is not an independent benchmark, a live re-test, or a claim of native UCP compatibility.
+
 ## Why it exists
 
 AI agents are starting to buy things. Before they buy, they need to know if a
