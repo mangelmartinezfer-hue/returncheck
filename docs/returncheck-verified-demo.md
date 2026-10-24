@@ -29,7 +29,7 @@ The following cases are the original test fixtures [RC25-01 to RC25-04](https://
 | RC25-03, Coastline Apparel | Final-sale clearance item | **NO** | Explicit final-sale exclusion; no window or deadline |
 | RC25-04, BrightHome Partners / MarketHub | Marketplace's general terms defer to individual seller | **UNKNOWN** | `third_party_seller` guard; no verified seller policy and no cited eligibility clause |
 
-These rows are a **summary of recorded fields**, not fabricated full HTTP responses.
+These rows are a **summary of recorded fields**, not fabricated full HTTP responses. There are **no recorded real-merchant YES, NO or UNKNOWN outputs** in this demonstration; IKEA supplies only the real-merchant YES_WITH_CONDITIONS evidence.
 
 ### RC25-01: YES, synthetic
 
@@ -57,6 +57,8 @@ Two production checks on 2–3 October 2026 used **caller-supplied text** captur
 | Unopened | YES_WITH_CONDITIONS | 365 days | not established | null | `fdb02230-512c-4658-bf7f-d19ee3d09319` |
 
 The relevant IKEA policy text distinguished open from new/unopened items and required proof of purchase. The extracted clauses did not explicitly establish when the clock starts, so ReturnCheck left the anchor and deadline undetermined rather than treating “proof of purchase” as a temporal anchor.
+
+**Public supporting field evidence:** [IKEA case with source clauses, recorded check IDs and limitations in the UCP PR #634 conversation](https://github.com/Universal-Commerce-Protocol/ucp/pull/634#issuecomment-5966598818). This is a field report, not a UCP endorsement.
 
 **Limitations:** different Worker versions were used for the two calls; the opened branch uses wording-specific handling; there are exclusions in the underlying policy. This is not a same-build controlled test, proof of broad coverage, or independent verification of merchant truth. The original request and response records, not reproduced in full here, are retained in the project's field case file.
 
